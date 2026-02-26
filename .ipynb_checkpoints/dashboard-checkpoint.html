@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>China Biopharma Deal Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0a0c10;--surf:#10141c;--brd:#1d2535;
+  --r:#E8433A;--b:#4A90D9;--g:#5BBF5A;--p:#9B5FC0;--o:#FF8C1A;
+  --txt:#dde3ee;--mut:#5a6a82;
+  --head:'Syne',sans-serif;--mono:'DM Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--mono);font-size:13px;line-height:1.6;min-height:100vh}
+
+/* Header */
+.hdr{padding:32px 48px 22px;border-bottom:1px solid var(--brd);display:flex;justify-content:space-between;align-items:flex-end;background:linear-gradient(170deg,#0f1520 0%,var(--bg) 100%)}
+.hdr h1{font-family:var(--head);font-size:1.8rem;font-weight:800;letter-spacing:-.03em;color:var(--txt)}
+.hdr h1 span{color:var(--r)}
+.hdr p{color:var(--mut);font-size:12px;margin-top:3px}
+.hdr-meta{text-align:right;color:var(--mut);font-size:11px;line-height:2.1}
+.hdr-meta strong{color:var(--txt)}
+.hdr-meta code{background:#ffffff0f;padding:2px 7px;border-radius:3px;font-size:11px;color:var(--g)}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--brd);border-bottom:1px solid var(--brd)}
+.kpi{background:var(--surf);padding:20px 26px;position:relative;overflow:hidden}
+.kpi::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px}
+.kpi:nth-child(1)::after{background:var(--r)}
+.kpi:nth-child(2)::after{background:var(--b)}
+.kpi:nth-child(3)::after{background:var(--g)}
+.kpi:nth-child(4)::after{background:var(--o)}
+.kpi-val{font-family:var(--head);font-size:2rem;font-weight:800;letter-spacing:-.04em;line-height:1}
+.kpi:nth-child(1) .kpi-val{color:var(--r)}
+.kpi:nth-child(2) .kpi-val{color:var(--b)}
+.kpi:nth-child(3) .kpi-val{color:var(--g)}
+.kpi:nth-child(4) .kpi-val{color:var(--o)}
+.kpi-lbl{color:var(--mut);font-size:10px;margin-top:5px;letter-spacing:.08em;text-transform:uppercase}
+.kpi-sub{color:var(--txt);font-size:12px;margin-top:3px;opacity:.7}
+
+/* Chart grid — 2x2 top, then 1x2 party aggregators */
+.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--brd);border-bottom:1px solid var(--brd)}
+.charts-grid.party-row{grid-template-columns:1fr 1fr}
+.chart-card{background:var(--surf);padding:22px 26px}
+.chart-card h3{font-family:var(--head);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.chart-card h3 .pill{background:#ffffff10;border-radius:20px;padding:1px 8px;font-size:10px;color:var(--txt)}
+.cw{height:185px;position:relative}
+.cw-tall{height:220px;position:relative}
+
+/* Filters */
+.filters{padding:12px 48px;display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--brd);background:var(--surf);flex-wrap:wrap}
+.filters label{color:var(--mut);font-size:10px;letter-spacing:.07em;text-transform:uppercase}
+.filters select,.filters input{
+  background:var(--bg);border:1px solid var(--brd);color:var(--txt);
+  padding:5px 10px;font-family:var(--mono);font-size:12px;border-radius:4px;outline:none;
+}
+.filters select:focus,.filters input:focus{border-color:var(--b)}
+.filters input{min-width:200px}
+#rc{color:var(--mut);font-size:11px;margin-left:auto}
+
+/* Table */
+.tw{overflow-x:auto;padding-bottom:58px}
+table{width:100%;border-collapse:collapse}
+thead tr{background:var(--surf);border-bottom:2px solid var(--brd)}
+th{padding:10px 5px;text-align:left;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:500;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:var(--txt)}
+tbody tr{border-bottom:1px solid var(--brd);transition:background .1s}
+tbody tr:hover{background:#ffffff05}
+tbody tr.hidden{display:none}
+td{padding:11px 5px;vertical-align:middle;max-width:180px}
+.dc{color:var(--b);white-space:nowrap;font-size:12px}
+.ac{color:var(--g);font-weight:500}
+.vc{color:var(--o);font-weight:500;white-space:nowrap}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;white-space:nowrap;font-weight:500}
+.atag{display:inline-block;background:#ffffff08;border:1px solid var(--brd);padding:2px 8px;border-radius:4px;font-size:11px;white-space:nowrap}
+.src-chip{display:inline-flex;align-items:center;gap:4px;background:#ffffff06;border:1px solid var(--brd);padding:3px 9px;border-radius:20px;font-size:11px;text-decoration:none;color:var(--txt);white-space:nowrap;transition:border-color .12s,color .12s}
+.src-chip:hover{border-color:var(--r);color:var(--r)}
+
+/* Expandable highlights */
+.hc{color:#8a9bb8;font-size:12px;line-height:1;max-width:240px;vertical-align:top;padding-top:5px}
+.ht-short,.ht-full{display:block}
+.expand-btn{
+  display:inline-block;margin-top:4px;padding:1px 7px;
+  background:transparent;border:1px solid var(--brd);
+  border-radius:10px;color:var(--b);font-size:10px;
+  font-family:var(--mono);cursor:pointer;
+  transition:border-color .1s,color .1s;
+}
+.expand-btn:hover{border-color:var(--b);color:var(--txt)}
+
+/* Footer */
+.foot{position:fixed;bottom:0;left:0;right:0;background:var(--surf);border-top:1px solid var(--brd);padding:8px 48px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--mut);z-index:10}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--g);display:inline-block;margin-right:6px;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="hdr">
+  <div>
+    <h1>China <span>Biopharma</span> Deal Tracker</h1>
+    <p>Automated intelligence on life science transactions involving Chinese companies</p>
+  </div>
+  <div class="hdr-meta">
+    <div>Last updated &nbsp;<strong>2026-02-24 20:36</strong></div>
+    <div>Persistent DB &nbsp;<strong>deals_database.json</strong></div>
+    <div>Refresh &nbsp;<code>python biopharma_agent.py</code></div>
+  </div>
+</div>
+
+<!-- KPIs -->
+<div class="kpis">
+  <div class="kpi">
+    <div class="kpi-val">15</div>
+    <div class="kpi-lbl">Total Deals</div>
+    <div class="kpi-sub">in database</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val" style="font-size:1.15rem">Oncology – Immuno-oncology</div>
+    <div class="kpi-lbl">Top Therapeutic Area</div>
+    <div class="kpi-sub">2 deals</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val" style="font-size:1.15rem">licensing-out</div>
+    <div class="kpi-lbl">Most Common Deal Type</div>
+    <div class="kpi-sub">13 deals</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-val" style="font-size:1rem">Jiangsu Hengrui Pharmaceuticals</div>
+    <div class="kpi-lbl">Most Active Chinese Party</div>
+    <div class="kpi-sub">4 deals</div>
+  </div>
+</div>
+
+<!-- Row 1: Area + Type -->
+<div class="charts-grid">
+  <div class="chart-card">
+    <h3>Deals by Therapeutic Area <span class="pill">14 areas</span></h3>
+    <div class="cw"><canvas id="aC"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h3>Deals by Type <span class="pill">3 types</span></h3>
+    <div class="cw"><canvas id="tC"></canvas></div>
+  </div>
+</div>
+
+<!-- Row 2: Top Chinese Party + Top Foreign Party -->
+<div class="charts-grid party-row">
+  <div class="chart-card">
+    <h3>Top Chinese Parties <span class="pill">by deal count</span></h3>
+    <div class="cw-tall"><canvas id="cnC"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h3>Top Foreign Parties <span class="pill">by deal count</span></h3>
+    <div class="cw-tall"><canvas id="fpC"></canvas></div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+  <label>Filter</label>
+  <select id="tf" onchange="filt()">
+    <option value="">All Types</option>
+    <option value="co-development">co-development</option><option value="licensing-out">licensing-out</option><option value="partnership">partnership</option>
+  </select>
+  <select id="af" onchange="filt()">
+    <option value="">All Areas</option>
+    <option value="Cardiovascular – Hypertriglyceridemia, Dyslipidemia">Cardiovascular – Hypertriglyceridemia, Dyslipidemia</option><option value="Cardiovascular – Hypertrophic cardiomyopathy">Cardiovascular – Hypertrophic cardiomyopathy</option><option value="Immunology – Autoimmune">Immunology – Autoimmune</option><option value="Immunology – Autoimmune, Inflammatory Bowel Disease">Immunology – Autoimmune, Inflammatory Bowel Disease</option><option value="Immunology – Inflammatory Bowel Disease">Immunology – Inflammatory Bowel Disease</option><option value="Immunology – Multiple Sclerosis, Autoimmune">Immunology – Multiple Sclerosis, Autoimmune</option><option value="Metabolic – Obesity">Metabolic – Obesity</option><option value="Oncology">Oncology</option><option value="Oncology – Immuno-oncology">Oncology – Immuno-oncology</option><option value="Oncology – NSCLC, Colorectal cancer">Oncology – NSCLC, Colorectal cancer</option><option value="Oncology – Small Cell Lung Cancer">Oncology – Small Cell Lung Cancer</option><option value="Oncology – Solid tumors (synthetic lethality)">Oncology – Solid tumors (synthetic lethality)</option><option value="Oncology, Immunology">Oncology, Immunology</option><option value="Respiratory – COPD, Immunology, Oncology">Respiratory – COPD, Immunology, Oncology</option>
+  </select>
+  <input id="sf" type="text" placeholder="Search company, asset, highlights..." oninput="filt()">
+  <span id="rc">15 deals</span>
+</div>
+
+<!-- Table -->
+<div class="tw">
+  <table>
+    <thead><tr>
+      <th onclick="srt(0)">Date ↕</th>
+      <th onclick="srt(1)">Chinese Party ↕</th>
+      <th onclick="srt(2)">Foreign Party ↕</th>
+      <th onclick="srt(3)">Asset ↕</th>
+      <th onclick="srt(4)">Therapeutic Area ↕</th>
+      <th onclick="srt(5)">Deal Type ↕</th>
+      <th onclick="srt(6)">Stage ↕</th>
+      <th onclick="srt(7)">Total Value ↕</th>
+      <th onclick="srt(8)">Upfront ↕</th>
+      <th onclick="srt(9)">Territory ↕</th>
+      <th>Highlights</th>
+      <th>Source</th>
+    </tr></thead>
+    <tbody id="dt"><tr class="dr" data-type="licensing-out" data-area="Immunology – Autoimmune, Inflammatory Bowel Disease"><td class="dc">April 2025</td><td><strong>Earendil Labs / Helixon Therapeutics</strong></td><td>Sanofi</td><td class="ac">Two bispecific antibodies targeting TL1A and IL-23 for autoimmune and inflammatory bowel diseases</td><td><span class="atag">Immunology – Autoimmune, Inflammatory Bowel Disease</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Preclinical/Phase 1</td><td class="vc">$1.8B</td><td>$125M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">Sanofi taps the red-hot TL1A/IL-23 bispecific space via a China-linked AI research startup, paying $125M upfront for two…</span><span class="ht-full" style="display:none">Sanofi taps the red-hot TL1A/IL-23 bispecific space via a China-linked AI research startup, paying $125M upfront for two candidates. Earendil Labs, affiliated with Chinese-VC-backed Helixon Therapeutics, exemplifies a new breed of US-China bridge companies. The deal reflects growing Big Pharma demand for next-gen immunology bispecifics, competing with AbbVie, Roche, and others pursuing TL1A-targeting therapies.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/sanofi-pens-18b-deal-2-bispecific-antibodies-aimed-autoimmune-immunology" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Immunology – Multiple Sclerosis, Autoimmune"><td class="dc">October 2025</td><td><strong>InnoCare Pharma</strong></td><td>Zenas BioPharma</td><td class="ac">BTK inhibitor for multiple sclerosis and 2 additional autoimmune drug candidates</td><td><span class="atag">Immunology – Multiple Sclerosis, Autoimmune</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 3 (MS drug) / Earlier stages for others</td><td class="vc">$2B+</td><td>Up to $100M (upfront + near-term milestones)</td><td>Global</td><td class="hc"><span class="ht-short">Zenas continues to build a pure-play autoimmune portfolio sourced from China, with the MS-focused BTK inhibitor already …</span><span class="ht-full" style="display:none">Zenas continues to build a pure-play autoimmune portfolio sourced from China, with the MS-focused BTK inhibitor already in Phase 3 offering near-term clinical catalysts. The deal underscores China&#39;s growing competitiveness in immunology beyond oncology. InnoCare gains capital and global development capabilities while retaining China rights, following the proven out-licensing playbook.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.reuters.com/business/healthcare-pharmaceuticals/zenas-bio-inks-potential-2-billion-licensing-deal-with-chinas-innocare-2025-10-08/" target="_blank" class="src-chip">📰 Reuters</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Cardiovascular – Hypertriglyceridemia, Dyslipidemia"><td class="dc">September 2025</td><td><strong>Argo Biopharmaceutical</strong></td><td>Novartis</td><td class="ac">RNA therapeutics portfolio targeting ANGPTL3 (BW-00112 and 2 discovery-stage molecules) for cardiovascular diseases</td><td><span class="atag">Cardiovascular – Hypertriglyceridemia, Dyslipidemia</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 2 (BW-00112) / Discovery</td><td class="vc">$5.2B</td><td>Not disclosed</td><td>Global ex-China</td><td class="hc"><span class="ht-short">A landmark RNA therapeutics deal that expands China-to-West licensing beyond traditional antibodies and small molecules …</span><span class="ht-full" style="display:none">A landmark RNA therapeutics deal that expands China-to-West licensing beyond traditional antibodies and small molecules into genetic medicines. Novartis secures options on ANGPTL3-targeting RNA drugs for cardiovascular metabolic diseases, building on prior collaborations with Chinese biotechs. The $5.2B potential value signals Novartis&#39;s conviction in RNA-based cardiometabolic therapies as a next frontier.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.reuters.com/business/healthcare-pharmaceuticals/novartis-signs-up-52-billion-licensing-deal-with-chinas-biotech-argo-heart-drugs-2025-09-03/" target="_blank" class="src-chip">📰 Reuters</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Cardiovascular – Hypertrophic cardiomyopathy"><td class="dc">September 2025</td><td><strong>Jiangsu Hengrui Pharmaceuticals</strong></td><td>Braveheart Bio</td><td class="ac">HRS-1893 – cardiac myosin inhibitor</td><td><span class="atag">Cardiovascular – Hypertrophic cardiomyopathy</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 1</td><td class="vc">$65M upfront + milestones (total not disclosed)</td><td>$65M ($32.5M cash + $32.5M equity)</td><td>Global ex-Greater China and Taiwan</td><td class="hc"><span class="ht-short">Led by ex-HI-Bio CEO, this stealthy NewCo positions itself to challenge Bristol Myers Squibb&#39;s Camzyos and Cytokinet…</span><span class="ht-full" style="display:none">Led by ex-HI-Bio CEO, this stealthy NewCo positions itself to challenge Bristol Myers Squibb&#39;s Camzyos and Cytokinetics&#39; aficamten in the hypertrophic cardiomyopathy market. The deal extends Hengrui&#39;s out-licensing prowess beyond oncology and obesity into cardiology, demonstrating the breadth of China&#39;s innovative pipeline. The equity component signals Braveheart&#39;s confidence in the asset&#39;s differentiation.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/led-ex-hi-bio-ceo-braveheart-pays-65m-challenge-bms-heart-disease-market-0" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="partnership" data-area="Respiratory – COPD, Immunology, Oncology"><td class="dc">July 2025</td><td><strong>Jiangsu Hengrui Pharmaceuticals</strong></td><td>GSK</td><td class="ac">HRS-9821 (COPD) and up to 12 drug programs across COPD, immunology, oncology</td><td><span class="atag">Respiratory – COPD, Immunology, Oncology</span></td><td><span class="badge" style="background:#5BBF5A28;color:#5BBF5A;border:1px solid #5BBF5A66">partnership</span></td><td>Multiple stages (Preclinical to Phase 2)</td><td class="vc">$12B</td><td>$500M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">The breadth of this deal—spanning up to 12 programs and $12B in biobucks—makes it one of the most expansive China out-li…</span><span class="ht-full" style="display:none">The breadth of this deal—spanning up to 12 programs and $12B in biobucks—makes it one of the most expansive China out-licensing agreements ever. GSK anchors the deal with HRS-9821 for COPD, strengthening its respiratory franchise, while gaining pipeline optionality across immunology and oncology. Hengrui cements its status as China&#39;s most prolific out-licensor, now partnered with virtually every major Western pharma.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/gsk-strengthens-copd-offering-12b-biobucks-deal-chinas-hengrui-pharma" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="co-development" data-area="Oncology, Immunology"><td class="dc">October 2025</td><td><strong>Innovent Biologics</strong></td><td>Eli Lilly</td><td class="ac">Multi-target oncology and immunology collaboration</td><td><span class="atag">Oncology, Immunology</span></td><td><span class="badge" style="background:#9B5FC028;color:#9B5FC0;border:1px solid #9B5FC066">co-development</span></td><td>Discovery/Preclinical</td><td class="vc">$8.8B</td><td>$350M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">Lilly and Innovent&#39;s collaboration &#39;moves beyond traditional licensing&#39; into a broad strategic alliance span…</span><span class="ht-full" style="display:none">Lilly and Innovent&#39;s collaboration &#39;moves beyond traditional licensing&#39; into a broad strategic alliance spanning oncology and immunology with undisclosed targets. The $8.8B total value (including $8.5B in milestones) and the open-ended nature of the collaboration reflect deep trust built over Lilly and Innovent&#39;s multi-year relationship. This deal model—strategic platform partnerships rather than single-asset licenses—may represent the next evolution of China out-licensing.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/lilly-innovent-pen-88b-collab-moves-beyond-traditional-licensing" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology – NSCLC, Colorectal cancer"><td class="dc">July 2025</td><td><strong>Innovent Biologics</strong></td><td>Takeda Pharmaceutical</td><td class="ac">IBI-363 (PD-1/IL-2α-biased bispecific) and IBI-343 (CLDN18.2 ADC)</td><td><span class="atag">Oncology – NSCLC, Colorectal cancer</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 2/3</td><td class="vc">$11.4B</td><td>$1.2B</td><td>Global ex-Greater China</td><td class="hc"><span class="ht-short">One of the largest China out-licensing deals ever, with a massive $1.2B upfront payment. Takeda describes this as &#39;t…</span><span class="ht-full" style="display:none">One of the largest China out-licensing deals ever, with a massive $1.2B upfront payment. Takeda describes this as &#39;transformative&#39; for its oncology portfolio, gaining a PD-1/IL-2α-biased bispecific (IBI-363) with breakthrough designations in China and the US, plus a CLDN18.2 ADC. The deal signals Japan&#39;s largest pharma betting its oncology future on Chinese innovation, and validates Innovent as a top-tier Chinese biotech platform.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.biopharmadive.com/news/takeda-innovent-cancer-drug-licensing-deal-china/803454/" target="_blank" class="src-chip">🌊 BioPharma Dive</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology – Solid tumors (synthetic lethality)"><td class="dc">January 2026</td><td><strong>Genhouse Bio</strong></td><td>Gilead Sciences</td><td class="ac">GH31 – MAT2A-targeting synthetic lethal therapy</td><td><span class="atag">Oncology – Solid tumors (synthetic lethality)</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 1-ready</td><td class="vc">$1.5B</td><td>$80M</td><td>Global</td><td class="hc"><span class="ht-short">Gilead deepens its synthetic lethality oncology strategy by acquiring global rights to Genhouse Bio&#39;s clinic-ready M…</span><span class="ht-full" style="display:none">Gilead deepens its synthetic lethality oncology strategy by acquiring global rights to Genhouse Bio&#39;s clinic-ready MAT2A inhibitor, competing directly with Ideaya/Amgen and BeiGene/CSPC in this emerging space. The deal reflects the escalating demand for MTAP-deleted tumor therapies and Gilead&#39;s continued appetite for China-originated oncology assets. The modest $80M upfront relative to $1.5B total suggests significant milestone-weighted structure.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/gileads-latest-synthetic-lethal-therapy-comes-15b-deal-chinas-genhouse" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology – Immuno-oncology"><td class="dc">May 2025</td><td><strong>3SBio</strong></td><td>Pfizer</td><td class="ac">PD-1xVEGF bispecific antibody</td><td><span class="atag">Oncology – Immuno-oncology</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 1/2</td><td class="vc">Not disclosed (upfront is $1.25B)</td><td>$1.25B</td><td>Global ex-China</td><td class="hc"><span class="ht-short">A blockbuster $1.25B upfront—one of the largest ever for a China-originated asset—signals Pfizer&#39;s aggressive entran…</span><span class="ht-full" style="display:none">A blockbuster $1.25B upfront—one of the largest ever for a China-originated asset—signals Pfizer&#39;s aggressive entrance into the PD-1/VEGF bispecific race against Merck, BioNTech, and Summit/Akeso. The deal reflects how the PD-1xVEGF class has become the most contested battleground in immuno-oncology, with Chinese biotechs originating nearly all the leading candidates. A watershed moment for China biopharma valuation.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/pfizer-pays-3sbio-125b-pd-1xvegf-bispecific-joining-biontech-merck-and-summit-red-hot-race" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Metabolic – Obesity"><td class="dc">May 2024</td><td><strong>Jiangsu Hengrui Pharmaceuticals</strong></td><td>Kailera Therapeutics (Hercules CM NewCo)</td><td class="ac">GLP-1/GIP dual agonist portfolio (KAI-9531 / HRS9531 and others)</td><td><span class="atag">Metabolic – Obesity</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 1/2</td><td class="vc">Not disclosed (Kailera launched with $400M)</td><td>$110M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">A landmark deal that created a new obesity-focused company (Kailera) built entirely around Hengrui&#39;s GLP-1 assets. B…</span><span class="ht-full" style="display:none">A landmark deal that created a new obesity-focused company (Kailera) built entirely around Hengrui&#39;s GLP-1 assets. Backed by $400M from Bain Capital, Atlas Venture, and RTW, this exemplifies the &#39;NewCo&#39; model for China out-licensing. Phase 2 data showed Zepbound-rivaling 22.8% weight loss at 36 weeks, validating Hengrui&#39;s competitiveness in the hottest therapeutic area globally.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.biopharmadive.com/news/kailera-obesity-launch-ron-renaud-hercules-hengrui/728536/" target="_blank" class="src-chip">🌊 BioPharma Dive</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology"><td class="dc">December 2024</td><td><strong>Jiangsu Hengrui Pharmaceuticals</strong></td><td>Ideaya Biosciences</td><td class="ac">ADC (antibody-drug conjugate)</td><td><span class="atag">Oncology</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Preclinical</td><td class="vc">Not disclosed</td><td>$75M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">Part of a flurry of year-end 2024 deals, Ideaya&#39;s $75M upfront for a Hengrui ADC expands its synthetic lethality-foc…</span><span class="ht-full" style="display:none">Part of a flurry of year-end 2024 deals, Ideaya&#39;s $75M upfront for a Hengrui ADC expands its synthetic lethality-focused oncology pipeline. Hengrui continues to be one of the most prolific Chinese out-licensors, monetizing its vast pipeline across multiple modalities and partners including GSK, Kailera, and Braveheart.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/beigene-brii-and-ideaya-ring-new-year-deal-news-betting-billions-biobucks-prospects" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology – Immuno-oncology"><td class="dc">November 2024</td><td><strong>LaNova Medicines</strong></td><td>Merck & Co.</td><td class="ac">PD-1xVEGF bispecific antibody</td><td><span class="atag">Oncology – Immuno-oncology</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 1</td><td class="vc">$3.3B</td><td>$588M</td><td>Global</td><td class="hc"><span class="ht-short">Merck&#39;s defensive move to protect Keytruda&#39;s dominance as PD-1/VEGF bispecifics emerge as a potentially superior…</span><span class="ht-full" style="display:none">Merck&#39;s defensive move to protect Keytruda&#39;s dominance as PD-1/VEGF bispecifics emerge as a potentially superior class. The $588M upfront—one of the largest for an early-stage China-originated asset—underscores Big Pharma urgency after Summit/Akeso&#39;s ivonescimab beat Keytruda in a head-to-head NSCLC trial. Positions Merck to compete with Pfizer/3SBio and BioNTech in the red-hot PD-1xVEGF space.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/merck-pays-588m-bispecific-defend-keytrudas-kingdom-emerging-threat" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Immunology – Inflammatory Bowel Disease"><td class="dc">January 2025</td><td><strong>Qyuns Therapeutics</strong></td><td>Caldera Therapeutics</td><td class="ac">CLD-423 – bispecific antibody targeting TL1A and IL-23</td><td><span class="atag">Immunology – Inflammatory Bowel Disease</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Preclinical</td><td class="vc">Not disclosed</td><td>Not disclosed (part of $112.5M Series A)</td><td>Global ex-China</td><td class="hc"><span class="ht-short">Caldera launched with $112.5M in Series A funding specifically to develop this dual-targeting bispecific for IBD, led by…</span><span class="ht-full" style="display:none">Caldera launched with $112.5M in Series A funding specifically to develop this dual-targeting bispecific for IBD, led by former Morphic CEO Praveen Tipirneni. The TL1A/IL-23 dual-targeting approach is highly strategic, as both targets are validated individually (e.g., Merck&#39;s tulisokibart for TL1A) but combining them in a single molecule could be differentiated. This deal exemplifies the VC model of creating purpose-built US startups around licensed Chinese assets.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/caldera-launches-112m-former-morphic-ceo-and-ibd-drug-china" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Immunology – Autoimmune"><td class="dc">January 2025</td><td><strong>Jiangsu Chia Tai Feng Hai Pharmaceutical</strong></td><td>Formation Bio (via Kenmare Bio subsidiary)</td><td class="ac">Oral small molecule for autoimmune diseases</td><td><span class="atag">Immunology – Autoimmune</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Preclinical</td><td class="vc">$500M</td><td>Not disclosed</td><td>Global ex-China</td><td class="hc"><span class="ht-short">Formation Bio&#39;s AI-driven clinical development platform &#39;Forge&#39; is being deployed to accelerate this autoimm…</span><span class="ht-full" style="display:none">Formation Bio&#39;s AI-driven clinical development platform &#39;Forge&#39; is being deployed to accelerate this autoimmune asset, continuing the company&#39;s China shopping spree. This deal illustrates the emerging model of AI-native biotechs specifically targeting Chinese assets for rapid clinical development, betting that AI can derisk and compress timelines for early-stage molecules. The $500M biobucks structure reflects the preclinical stage and inherent risk.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/formation-bios-china-shopping-spree-continues-500m-biobucks-autoimmune-pact" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr><tr class="dr" data-type="licensing-out" data-area="Oncology – Small Cell Lung Cancer"><td class="dc">December 2024</td><td><strong>Zejing Biopharmaceutical (Zelgen)</strong></td><td>AbbVie</td><td class="ac">Alveltamig (ZG006) – DLL3-targeting trispecific T-cell engager</td><td><span class="atag">Oncology – Small Cell Lung Cancer</span></td><td><span class="badge" style="background:#E8433A28;color:#E8433A;border:1px solid #E8433A66">licensing-out</span></td><td>Phase 3</td><td class="vc">Not disclosed (>$100M upfront)</td><td>$100M</td><td>Global ex-China</td><td class="hc"><span class="ht-short">AbbVie paid a substantial $100M upfront to option alveltamig, a DLL3-targeting trispecific T-cell engager already in Pha…</span><span class="ht-full" style="display:none">AbbVie paid a substantial $100M upfront to option alveltamig, a DLL3-targeting trispecific T-cell engager already in Phase 3 for SCLC in China. This deal directly challenges Amgen&#39;s Imdelltra (tarlatamab) in the DLL3 space, with ZG006 designed to bind two distinct DLL3 epitopes—potentially offering improved tumor-cell engagement. The late-stage status and competitive dynamics in the SCLC T-cell engager arena make this a high-conviction, high-stakes licensing play by AbbVie.</span><button class="expand-btn" onclick="toggleHL(this)">+ more</button></td><td><a href="https://www.fiercebiotech.com/biotech/abbvie-gilead-gift-themselves-clinical-stage-cancer-drugs" target="_blank" class="src-chip">🔥 FierceBiotech</a></td></tr></tbody>
+  </table>
+</div>
+
+<!-- Footer -->
+<div class="foot">
+  <div><span class="dot"></span>Re-run agent to update</div>
+  <div>China Biopharma Deal Tracker &bull; Powered by Claude</div>
+  <div>15 deals tracked</div>
+</div>
+
+<script>
+// ── Set1 Palette ──────────────────────────────────────────────────────────────
+const S1 = ["#E8433A", "#4A90D9", "#5BBF5A", "#9B5FC0", "#FF8C1A", "#F5D63D", "#C47035", "#F07DB0", "#8A9BB0"];
+
+// ── Shared chart options ──────────────────────────────────────────────────────
+const gridColor = '#1d2535';
+const tickColor = '#5a6a82';
+const barCfg = (labels, data, horizontal=false) => ({
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [{
+      data,
+      backgroundColor: S1.map(c => c + '99'),
+      borderColor:     S1,
+      borderWidth: 1,
+      borderRadius: 3,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    indexAxis: horizontal ? 'y' : 'x',
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+      y: { ticks: { color: tickColor, font: { size: 10 }, stepSize: 1 }, grid: { color: gridColor } }
+    }
+  }
+});
+
+// Area chart
+new Chart(document.getElementById('aC'), barCfg(
+  ["Oncology \u2013 Small Cell Lung Cancer", "Immunology \u2013 Autoimmune", "Immunology \u2013 Inflammatory Bowel Disease", "Oncology \u2013 Immuno-oncology", "Oncology", "Metabolic \u2013 Obesity", "Oncology \u2013 Solid tumors (synthetic lethality)", "Oncology \u2013 NSCLC, Colorectal cancer", "Oncology, Immunology", "Respiratory \u2013 COPD, Immunology, Oncology", "Cardiovascular \u2013 Hypertrophic cardiomyopathy", "Cardiovascular \u2013 Hypertriglyceridemia, Dyslipidemia", "Immunology \u2013 Multiple Sclerosis, Autoimmune", "Immunology \u2013 Autoimmune, Inflammatory Bowel Disease"], [1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+));
+
+// Type doughnut
+new Chart(document.getElementById('tC'), {
+  type: 'doughnut',
+  data: {
+    labels: ["licensing-out", "co-development", "partnership"],
+    datasets: [{ data: [13, 1, 1], backgroundColor: S1, borderWidth: 0, hoverOffset: 10 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'right', labels: { color: '#8a9bb8', font: { size: 11 }, boxWidth: 12, padding: 10 } }
+    }
+  }
+});
+
+// Top Chinese Parties — horizontal bar
+new Chart(document.getElementById('cnC'), {
+  type: 'bar',
+  data: {
+    labels: ["Jiangsu Hengrui Pharmaceuticals", "Innovent Biologics", "Zejing Biopharmaceutical (Zelgen)", "Jiangsu Chia Tai Feng Hai Pharmaceutical", "Qyuns Therapeutics", "LaNova Medicines", "3SBio", "Genhouse Bio"],
+    datasets: [{
+      data: [4, 2, 1, 1, 1, 1, 1, 1],
+      backgroundColor: S1[0] + '88',
+      borderColor: S1[0],
+      borderWidth: 1,
+      borderRadius: 3,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor, font: { size: 10 }, stepSize: 1 }, grid: { color: gridColor } },
+      y: { ticks: { color: '#dde3ee', font: { size: 11 } }, grid: { color: 'transparent' } }
+    }
+  }
+});
+
+// Top Foreign Parties — horizontal bar
+new Chart(document.getElementById('fpC'), {
+  type: 'bar',
+  data: {
+    labels: ["AbbVie", "Formation Bio (via Kenmare Bio subsidiary)", "Caldera Therapeutics", "Merck & Co.", "Ideaya Biosciences", "Kailera Therapeutics (Hercules CM NewCo)", "Pfizer", "Gilead Sciences"],
+    datasets: [{
+      data: [1, 1, 1, 1, 1, 1, 1, 1],
+      backgroundColor: S1[1] + '88',
+      borderColor: S1[1],
+      borderWidth: 1,
+      borderRadius: 3,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor, font: { size: 10 }, stepSize: 1 }, grid: { color: gridColor } },
+      y: { ticks: { color: '#dde3ee', font: { size: 11 } }, grid: { color: 'transparent' } }
+    }
+  }
+});
+
+// ── Expandable highlights ─────────────────────────────────────────────────────
+function toggleHL(btn) {
+  const cell = btn.parentElement;
+  const short = cell.querySelector('.ht-short');
+  const full  = cell.querySelector('.ht-full');
+  const expanded = full.style.display !== 'none';
+  short.style.display = expanded ? 'block' : 'none';
+  full.style.display  = expanded ? 'none'  : 'block';
+  btn.textContent     = expanded ? '+ more' : '− less';
+}
+
+// ── Filter ────────────────────────────────────────────────────────────────────
+function filt() {
+  const tv = document.getElementById('tf').value.toLowerCase();
+  const av = document.getElementById('af').value.toLowerCase();
+  const sv = document.getElementById('sf').value.toLowerCase();
+  let n = 0;
+  document.querySelectorAll('#dt .dr').forEach(r => {
+    const ok = (!tv || r.dataset.type.toLowerCase() === tv)
+            && (!av || r.dataset.area.toLowerCase() === av)
+            && (!sv || r.textContent.toLowerCase().includes(sv));
+    r.classList.toggle('hidden', !ok);
+    if (ok) n++;
+  });
+  document.getElementById('rc').textContent = n + ' deals';
+}
+
+// ── Sort ──────────────────────────────────────────────────────────────────────
+let sd = {};
+function srt(c) {
+  const tb   = document.getElementById('dt');
+  const rows = [...tb.querySelectorAll('.dr')];
+  sd[c] = !sd[c];
+  rows.sort((a, b) => {
+    const A = a.cells[c]?.textContent.trim() || '';
+    const B = b.cells[c]?.textContent.trim() || '';
+    return sd[c] ? A.localeCompare(B) : B.localeCompare(A);
+  });
+  rows.forEach(r => tb.appendChild(r));
+}
+</script>
+</body>
+</html>
