@@ -44,7 +44,7 @@ MAX_STEPS = 60   # ~15 searches × (1 search + 3 saves avg) = 60 steps for a ful
 
 # Persistent database file
 DB_PATH        = Path("deals_database.json")
-DASHBOARD_PATH = Path("dashboard.html")
+DASHBOARD_PATH = Path("index.html")
 CSV_PATH       = Path("china_biopharma_deals.csv")
 
 PRIORITY_SOURCES = [
@@ -93,20 +93,43 @@ STAGE_ENUM = [
 ]
 
 TA_ENUM = [
-    "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
-    "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
-    "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
-    "Oncology – Multiple Indications",
-    "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
-    "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
-    "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
-    "Metabolic – Obesity", "Metabolic – Diabetes",
-    "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
-    "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
-    "Nephrology – IgA Nephropathy", "Nephrology – Other",
-    "Respiratory – Asthma", "Respiratory – Other",
-    "Women's Health", "RNA Therapeutics – Platform",
-    "Multiple Indications", "Not Disclosed",
+    # Major Pharma Vertical – largest global R&D area
+    "Oncology - Lung",
+    "Oncology - Breast",
+    "Oncology - Other",
+    
+    # Immunology & Inflammation
+    "Immunology / Inflammation",
+
+    # CNS + Psychiatry combined (cleaner than splitting)
+    "Neurology / CNS",
+    "Psychiatry / Mental Health",
+
+    # Large chronic disease clusters
+    "Metabolic",
+    "Cardiovascular",
+    "Nephrology",
+    "Respiratory",
+    "Gastroenterology / Hepatology",
+
+    # High investment verticals
+    "Rare Diseases",
+    "Infectious Diseases",
+    "Vaccines",
+
+    # Specialty verticals
+    "Hematology (Non-Oncology)",
+    "Ophthalmology",
+    "Dermatology",
+    "Endocrinology (Non-Metabolic)",
+
+    # Emerging/tech-driven categories
+    "Cell & Gene Therapy",
+    "Platform / Technology",
+
+    # Cross-area
+    "Multiple Indications",
+    "Not Disclosed",
 ]
 
 TERRITORY_ENUM = [
