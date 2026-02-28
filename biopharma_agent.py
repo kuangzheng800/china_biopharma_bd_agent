@@ -24,6 +24,7 @@ HOW TO USE IT:
 """
 
 import os
+import re
 import json
 import argparse
 import anthropic
@@ -39,11 +40,11 @@ TAVILY_API_KEY    = os.environ.get("TAVILY_API_KEY", "")
 
 client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 MODEL    = "claude-opus-4-6"
-MAX_STEPS = 15
+MAX_STEPS = 60   # ~15 searches × (1 search + 3 saves avg) = 60 steps for a full run
 
 # Persistent database file
 DB_PATH        = Path("deals_database.json")
-DASHBOARD_PATH = Path("index.html")
+DASHBOARD_PATH = Path("dashboard.html")
 CSV_PATH       = Path("china_biopharma_deals.csv")
 
 PRIORITY_SOURCES = [
@@ -53,6 +54,22 @@ PRIORITY_SOURCES = [
     "reuters.com",
     "bloomberg.com",
     "statnews.com",
+]
+
+# Chinese-language biopharma news sources
+CHINESE_SOURCES = [
+    "healthnews.cn",          # 健康报 — official pharma/health news
+    "phirda.com",             # 医药魔方 — deal tracking, very comprehensive
+    "pharmacodia.com",        # 药渡 — drug pipeline & deal database
+    "cn-healthcare.com",      # 健康界
+    "drugscitech.com",        # 药学进展
+    "menet.com.cn",           # 医药经济报
+    "bioon.com",              # 生物谷 — biopharma news
+    "biocentury.com.cn",      # BioWorld China
+    "vbdata.cn",              # 动脉网 — Chinese biotech deals
+    "synbiobeta.com",
+    "szse.cn",                # Shenzhen Stock Exchange disclosures
+    "sse.com.cn",             # Shanghai Stock Exchange disclosures
 ]
 
 # ── Persistent Database ────────────────────────────────────────────────────────
@@ -80,8 +97,55 @@ def normalize_name(s: str) -> str:
 
 # Maps any company name variant → canonical key used only for dedup grouping
 _COMPANY_ALIASES = {
+    # ── Chinese party aliases (derived from DB + Nature CSV audit) ─────────────
+    # Hengrui
     'hengruipharma': 'hengrui', 'jiangsuhengruipharmaceuticals': 'hengrui',
     'jiangsuhengruipharma': 'hengrui', 'hengruimedicine': 'hengrui',
+    # CSPC
+    'cspc': 'cspc', 'cspcpharmaceuticalgroup': 'cspc', 'cspcpharmaceuticalgr': 'cspc',
+    # Fosun / YaoPharma
+    'fosunpharma': 'fosun', 'fosunpharmasubsidiary': 'fosun',
+    'fosunpharmasinfinitypharmaceuticals': 'fosun', 'fosunsinfinitypharmaceuticals': 'fosun',
+    'fosunpharmayaopharmasubsidiary': 'fosun', 'fosunpharmasinfinitypharm': 'fosun',
+    'yaopharmafosunpharmasubsidiary': 'fosun', 'yaopharmafosunpharmaceuticalsubsidiary': 'fosun',
+    # Hansoh
+    'hansohpharma': 'hansoh', 'hansohpharmaceuticals': 'hansoh',
+    # Duality Biologics
+    'dualitybiologics': 'duality', 'dualitybiodualitybiologics': 'duality',
+    'dualitybioduobaobiotechnology': 'duality',
+    # LaNova
+    'lanova': 'lanova', 'lanovamedicines': 'lanova',
+    # Akeso
+    'akeso': 'akeso', 'akesopharma': 'akeso',
+    # Argo
+    'argobiopharma': 'argo', 'argobiopharmaceutical': 'argo',
+    'argobiopharmaceuticalchinabased': 'argo', 'argobiotherapeutics': 'argo',
+    'argopharmaceutical': 'argo', 'argobiopharmaceuticalchinafo': 'argo',
+    # Kelun
+    'kelunbiotech': 'kelun', 'kelunbiopharma': 'kelun',
+    # Simcere
+    'simcerepharmaceutical': 'simcere', 'simcerezaiming': 'simcere',
+    # Earendil / Helixon
+    'earendil': 'earendil', 'earendillabshelixontherapeutics': 'earendil',
+    'earendillabsaffiliateofhelixontherapeuticschina': 'earendil',
+    'helixontherapeuticsviaearendillabs': 'earendil',
+    # Jiangsu Chia Tai Feng Hai
+    'jiangsuchiataifenghaipharmaceutical': 'chiatai',
+    'jiangsuchiataifenghaipharmaceuticalsinobiopharmaceuticalsubsidiary': 'chiatai',
+    'jiangsuchiataifengha': 'chiatai',
+    # Sino Biopharmaceutical
+    'sinobiopharm': 'sinobiopharm', 'sinobiopharmaceutical': 'sinobiopharm',
+    # SystImmune
+    'systimmunebiokinpharmaceuticalsubsidiary': 'systimmune',
+    # ImmuneOnco
+    'immuneonco': 'immuneoncobiopharma', 'immuneoncobiopharma': 'immuneoncobiopharma',
+    # Suzhou Ribo
+    'suzhouribolifescience': 'suzhouribolife', 'ribolifescienceviaribocurepharmaceuticals': 'suzhouribolife',
+    # Curon
+    'curonbiopharma': 'curon', 'curonpharmaceutical': 'curon',
+    # Innovent
+    'innoventbiologics': 'innovent',
+    # ── Western party aliases ──────────────────────────────────────────────────
     'merck': 'merck', 'merckco': 'merck', 'mercksharp': 'merck', 'msd': 'merck',
     'astrazeneca': 'astrazeneca', 'az': 'astrazeneca',
     'gsk': 'gsk', 'glaxosmithkline': 'gsk',
@@ -90,13 +154,6 @@ _COMPANY_ALIASES = {
     'elililly': 'lilly', 'lilly': 'lilly',
     'johnsonjohnson': 'jnj', 'janssen': 'jnj',
     'gileadsciences': 'gilead', 'gilead': 'gilead',
-    'simcerezaiming': 'simcere', 'simcerepharmaceutical': 'simcere',
-    'fosunpharma': 'fosun', 'fosunpharmasubsidiary': 'fosun',
-    'fosunpharmasinfinity': 'fosun', 'fosunsinfinitypharmaceuticals': 'fosun',
-    'fosunpharmasinfinitypharmaceuticals': 'fosun',
-    'cspcpharmaceuticalgroup': 'cspc', 'cspcpharmaceuticalgr': 'cspc',
-    'innoventbiologics': 'innovent',
-    'jiangsuchiataifenghaipharmaceutical': 'chiatai', 'jiangsuchiataifengha': 'chiatai',
     'pfizer': 'pfizer', 'novartis': 'novartis', 'sanofi': 'sanofi',
     'takeda': 'takeda', 'abbvie': 'abbvie',
 }
@@ -165,11 +222,12 @@ def is_duplicate(deal: dict, existing_deals: list) -> bool:
                 or values_match(new_up, d.get("upfront_usd",""))):
             if drug_names_match(new_dn, d.get("drug_name","") or d.get("asset","")):
                 return True
-    # Fallback: exact asset + Chinese party (legacy safety net)
+    # Fallback: exact asset + Chinese party + same month (legacy safety net)
     for d in existing_deals:
         if (d.get("chinese_party","").lower() == deal.get("chinese_party","").lower()
                 and d.get("asset","").lower() == deal.get("asset","").lower()
-                and d.get("deal_type","").lower() == deal.get("deal_type","").lower()):
+                and d.get("deal_type","").lower() == deal.get("deal_type","").lower()
+                and d.get("announcement_month_year","") == deal.get("announcement_month_year","")):
             return True
     return False
 
@@ -178,93 +236,103 @@ def is_duplicate(deal: dict, existing_deals: list) -> bool:
 TOOLS = [
     {
         "name": "search_web",
-        "description": (
-            "Search the web for recent biopharma deal news. "
-            "Prefer fiercebiotech.com, endpointsnews.com, biopharmadive.com, reuters.com."
-        ),
+        "description": "Search English-language web scoped to PRIORITY SOURCES only (FierceBiotech, Endpoints News, BioPharma Dive, Reuters, Bloomberg, STAT News). Use this for ROUND 2 (priority deep-dives) — after search_web_wide has already found candidate deals and you want authoritative confirmation or richer detail from top-tier publications.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"}
-            },
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "search_web_wide",
+        "description": "Open web search with NO domain restrictions — searches the entire web including press releases, company IR pages, biotech blogs, regional news, wire services, and any other source. Use this as your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7). Casts the widest net and catches deals that never appear in priority sources.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "search_web_cn",
+        "description": "Search Chinese-language sources (医药魔方, 药渡, 生物谷, stock exchange filings). Use Mandarin queries for best results. Use for deals involving less well-known Chinese companies not covered by English press.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Preferably in Mandarin, e.g. '普方生物 对外授权 2024'"}},
             "required": ["query"]
         }
     },
     {
         "name": "save_deal",
-        "description": "Save one structured deal record. Call once per deal found.",
+        "description": "Save one deal. Call once per deal found.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "announcement_month_year": {
-                    "type": "string",
-                    "description": "Month and year e.g. 'March 2024'"
-                },
+                "announcement_month_year": {"type": "string"},
                 "deal_type": {
                     "type": "string",
-                    "description": (
-                        "Choose the MOST SPECIFIC type that applies:\n"
-                        "  licensing-out   — Chinese company grants rights to foreign party\n"
-                        "  licensing-in    — Chinese company acquires rights from foreign party\n"
-                        "  option-to-license — foreign party pays for the RIGHT to later license (option fee + potential full license)\n"
-                        "  newco-spinout   — investors create a new company to hold assets licensed FROM a Chinese company\n"
-                        "  platform-deal   — access to a technology platform (AI, ADC linker, delivery tech) rather than a specific drug\n"
-                        "  co-development  — joint R&D with shared costs and rights\n"
-                        "  partnership     — broad strategic collaboration without a specific asset transfer\n"
-                        "  M&A             — merger or full company acquisition\n"
-                        "  acquisition     — purchase of a specific asset, program, or subsidiary"
-                    )
+                    "enum": [
+                        "licensing-out", "licensing-in", "option-to-license",
+                        "newco-spinout", "platform-deal", "co-development",
+                        "partnership", "M&A", "acquisition"
+                    ]
                 },
-                "equity_component": {
-                    "type": "string",
-                    "description": "Equity taken by Chinese party, e.g. '~20% stake in Hercules', '$100M equity investment', or 'None'"
-                },
-                "chinese_party": {"type": "string"},
-                "foreign_party":  {"type": "string", "description": "Non-Chinese company or 'N/A'"},
-                "asset":          {"type": "string", "description": "Drug name or platform (full description with context)"},
-                "drug_name":      {"type": "string", "description": "Short canonical drug/therapy name only — e.g. 'ivonescimab', 'HRS-5346', 'SSGJ-707'. Use the INN or internal code. No descriptions."},
-                "modality": {
-                    "type": "string",
-                    "description": "e.g. Small Molecule, Monoclonal Antibody, Bispecific Antibody, ADC, Cell Therapy, Gene Therapy, siRNA, mRNA, Fusion Protein, Peptide, Oligonucleotide"
-                },
+                "chinese_party":    {"type": "string"},
+                "foreign_party":    {"type": "string"},
+                "asset":            {"type": "string"},
+                "drug_name":        {"type": "string"},
+                "modality":         {"type": "string"},
                 "therapeutic_area": {
                     "type": "string",
-                    "description": "e.g. Oncology, CNS, Rare Disease, Immunology, Metabolic"
+                    "enum": [
+                        "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
+                        "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
+                        "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
+                        "Oncology – Multiple Indications",
+                        "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
+                        "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
+                        "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
+                        "Metabolic – Obesity", "Metabolic – Diabetes",
+                        "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
+                        "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
+                        "Nephrology – IgA Nephropathy", "Nephrology – Other",
+                        "Respiratory – Asthma", "Respiratory – Other",
+                        "Women's Health", "RNA Therapeutics – Platform",
+                        "Multiple Indications", "Not Disclosed"
+                    ]
                 },
-                "stage": {
+                "stage":            {"type": "string"},
+                "total_value_usd":  {"type": "string"},
+                "upfront_usd":      {"type": "string"},
+                "territory": {
                     "type": "string",
-                    "description": "Preclinical, Phase 1, Phase 2, Phase 3, Approved, Platform"
+                    "enum": [
+                        "Global", "Global ex-China", "Global ex-Greater China",
+                        "Greater China", "China Mainland", "US & Europe", "Europe",
+                        "Asia ex-China", "Latin America", "Multiple Regions", "Not Disclosed"
+                    ]
                 },
-                "total_value_usd": {"type": "string", "description": "e.g. '$1.2B' or 'Not disclosed'"},
-                "upfront_usd":     {"type": "string", "description": "e.g. '$100M' or 'Not disclosed'"},
-                "territory":       {"type": "string", "description": "e.g. 'Global ex-China', 'US & Europe'"},
-                "highlights": {
+                "equity_component": {"type": "string"},
+                "chinese_hq": {
                     "type": "string",
-                    "description": "2-3 sentence analyst commentary: why is this deal notable? strategic rationale? standout terms?"
+                    "enum": ["Yes", "No", "Unknown"],
+                    "description": "Is the chinese_party headquartered in mainland China/HK/Macau? Set 'Yes' even if the company has an English-sounding name (e.g. ProFoundBio, Regor, AnHearts, Eccogene, I-Mab, Biotheus, Triastek)."
                 },
-                "source_url": {
-                    "type": "string",
-                    "description": "URL — prefer FierceBiotech, Endpoints News, BioPharma Dive, Reuters"
-                },
-                "source_name": {
-                    "type": "string",
-                    "description": "Publication e.g. 'FierceBiotech', 'Endpoints News', 'Reuters'"
-                }
+                "highlights":       {"type": "string"},
+                "source_url":       {"type": "string"},
+                "source_name":      {"type": "string"}
             },
             "required": [
                 "announcement_month_year", "deal_type", "chinese_party",
-                "asset", "therapeutic_area", "highlights", "source_url", "source_name"
+                "asset", "therapeutic_area", "source_url", "source_name"
             ]
         }
     },
     {
         "name": "finish",
-        "description": "Call when done with all searches.",
+        "description": "Call when all searches are done.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "summary": {"type": "string"}
-            },
+            "properties": {"summary": {"type": "string"}},
             "required": ["summary"]
         }
     }
@@ -358,7 +426,88 @@ SNIPPET: LaNovation Pharma licensed its HER3-targeting ADC to AstraZeneca for gl
 MONTH_NAMES = {"January","February","March","April","May","June",
                "July","August","September","October","November","December"}
 
-def sanitize_date(raw: str) -> str:
+def search_web_cn(query: str) -> str:
+    """Search Chinese-language sources. Query should be in Mandarin for best results."""
+    if TAVILY_API_KEY:
+        try:
+            # First try with Chinese source preference
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": TAVILY_API_KEY,
+                    "query": query,
+                    "search_depth": "advanced",
+                    "max_results": 8,
+                    "include_domains": CHINESE_SOURCES
+                },
+                timeout=15
+            )
+            results = resp.json().get("results", [])
+            # Fall back to open search (no domain filter) if Chinese sources return nothing
+            if not results:
+                resp2 = requests.post(
+                    "https://api.tavily.com/search",
+                    json={"api_key": TAVILY_API_KEY, "query": query,
+                          "search_depth": "advanced", "max_results": 8},
+                    timeout=15
+                )
+                results = resp2.json().get("results", [])
+            if not results:
+                return "No results found."
+            out = []
+            for r in results:
+                domain   = r.get("url","").split("/")[2] if "/" in r.get("url","") else ""
+                priority = "★ CN SOURCE" if any(p in domain for p in CHINESE_SOURCES) else ""
+                body     = r.get("content","") or r.get("raw_content","") or ""
+                out.append(
+                    f"{priority}\nTITLE: {r.get('title','')}\n"
+                    f"URL: {r.get('url','')}\n"
+                    f"CONTENT: {body[:1500]}\n"
+                )
+            return "\n---\n".join(out)
+        except Exception as e:
+            return f"Search error: {e}"
+    else:
+        return "No Tavily API key — Chinese search unavailable."
+
+
+def search_web_wide(query: str) -> str:
+    """
+    Open web search with NO domain restrictions.
+    Primary discovery tool — finds deals on press wires, company IR pages,
+    regional biotech sites, and anywhere else deals are reported.
+    """
+    if TAVILY_API_KEY:
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": TAVILY_API_KEY,
+                    "query": query,
+                    "search_depth": "advanced",
+                    "max_results": 8,
+                    # No include_domains — full web
+                },
+                timeout=15
+            )
+            results = resp.json().get("results", [])
+            if not results:
+                return "No results found."
+            out = []
+            for r in results:
+                domain   = r.get("url", "").split("/")[2] if "/" in r.get("url", "") else ""
+                priority = "★ PRIORITY SOURCE" if any(p in domain for p in PRIORITY_SOURCES) else ""
+                body     = r.get("content", "") or r.get("raw_content", "") or ""
+                out.append(
+                    f"{priority}\nTITLE: {r.get('title','')}\n"
+                    f"URL: {r.get('url','')}\n"
+                    f"CONTENT: {body[:2000]}\n"
+                )
+            return "\n---\n".join(out)
+        except Exception as e:
+            return f"Search error: {e}"
+    else:
+        return "No Tavily API key — wide search unavailable."
     """Ensure announcement_month_year is 'Month YYYY'. Fallback to current month."""
     if not raw:
         return datetime.now().strftime("%B %Y")
@@ -416,6 +565,102 @@ def validate_deal(deal_data: dict) -> tuple[bool, str]:
     return True, ""
 
 
+TA_CANONICAL = {
+    'Autoimmune': 'Immunology – Multiple Indications',
+    'Autoimmune / Immunology': 'Immunology – Multiple Indications',
+    'Autoimmune / Oncology – B-NHL': 'Oncology – Lymphoma / Leukemia',
+    'Autoimmune / Oncology – Multiple Myeloma': 'Oncology – Lymphoma / Leukemia',
+    'Autoimmune Diseases': 'Immunology – Multiple Indications',
+    'Cardiovascular – Cardiometabolic diseases': 'Cardiovascular – Cardiometabolic',
+    'Cardiovascular – Dyslipidemia': 'Cardiovascular – Dyslipidemia',
+    'Immunology – Allergic Disorders (food allergy, asthma, CSU)': 'Immunology – Asthma / Allergic Disorders',
+    'Immunology – Atopic Dermatitis, Asthma': 'Immunology – Atopic Dermatitis',
+    'Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps': 'Immunology – Atopic Dermatitis',
+    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)": 'Immunology – Psoriasis / Inflammatory',
+    'Immunology – Inflammatory Bowel Disease (IBD)': 'Immunology – Inflammatory Bowel Disease',
+    'Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis': 'Immunology – Lupus / Nephrology',
+    'Metabolic – Obesity / Cardiometabolic': 'Metabolic – Obesity',
+    'Metabolic – Obesity/Type 2 Diabetes': 'Metabolic – Obesity',
+    'Metabolic – Type 2 Diabetes / MASH': 'Metabolic – Diabetes',
+    'Multiple – oral RNA therapeutics': 'RNA Therapeutics – Platform',
+    'Nephrology – IgA Nephropathy': 'Nephrology – IgA Nephropathy',
+    'Not disclosed (likely Oncology based on BioNTech pipeline focus)': 'Not Disclosed',
+    'Oncology': 'Oncology – Multiple Indications',
+    'Oncology – Advanced Solid Tumors': 'Oncology – Solid Tumors',
+    'Oncology – Breast Cancer (HR+/HER2-)': 'Oncology – Breast Cancer',
+    'Oncology – Chronic Myeloid Leukemia (CML)': 'Oncology – Lymphoma / Leukemia',
+    'Oncology – Gastrointestinal Cancer': 'Oncology – Gastrointestinal Cancer',
+    'Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors': 'Oncology – Breast Cancer',
+    'Oncology – NSCLC': 'Oncology – NSCLC',
+    'Oncology – NSCLC, SCLC, TNBC': 'Oncology – NSCLC',
+    'Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases': 'Oncology – Lymphoma / Leukemia',
+    'Oncology – Ovarian Cancer / Solid Tumors': 'Oncology – Ovarian Cancer',
+    'Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)': 'Oncology – Solid Tumors',
+    'Oncology – ROS1-positive NSCLC': 'Oncology – NSCLC',
+    'Oncology – SCLC / Neuroendocrine Tumors': 'Oncology – Neuroendocrine Tumors',
+    'Oncology – Solid Tumors': 'Oncology – Solid Tumors',
+    'Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)': 'Oncology – Solid Tumors',
+    'Oncology – Solid Tumors (Urothelial Cancer, TNBC)': 'Oncology – Solid Tumors',
+    'Oncology – Solid Tumors (adult and pediatric)': 'Oncology – Solid Tumors',
+    'Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)': 'Oncology – Solid Tumors',
+    'Oncology – Solid Tumors/NSCLC': 'Oncology – NSCLC',
+    'Oncology – lung cancer, gastrointestinal cancer, ovarian cancer': 'Oncology – Solid Tumors',
+    'Oncology; Immunology – multiple indications': 'Oncology – Multiple Indications',
+    'Respiratory/Immunology – Asthma, Atopic Dermatitis': 'Respiratory – Asthma',
+    "Women's Health – Fertility / Assisted Reproductive Technology": "Women's Health",
+}
+
+TERRITORY_CANONICAL = {
+    'Global': 'Global',
+    'Global (Hansoh retains option to co-promote or solely commercialize in China)': 'Global',
+    'Global (exclusive rights to BioNTech)': 'Global',
+    'Worldwide': 'Global',
+    'Worldwide (Phase 1 asset) + ex-Greater China (Phase 1/2a asset)': 'Global ex-Greater China',
+    'Worldwide (taletrectinib previously out-licensed in China to Innovent, Japan to Nippon Kayaku, Korea)': 'Global',
+    'Global ex-China': 'Global ex-China',
+    'Global ex-China (all territories outside mainland China, Hong Kong, Macau, Taiwan, and Russia)': 'Global ex-China',
+    'Global ex-China (excluding Mainland China, Hong Kong, Macau and Taiwan)': 'Global ex-China',
+    'Global ex-China (excluding mainland China, Hong Kong, Macau and Taiwan)': 'Global ex-China',
+    'Global ex-China (excluding mainland China, Hong Kong, Macau, Taiwan)': 'Global ex-China',
+    'Global ex-China (excluding mainland China, Hong Kong, and Macau)': 'Global ex-China',
+    'Global ex-Greater China': 'Global ex-Greater China',
+    'Greater China': 'Greater China',
+    'Greater China and Singapore': 'Greater China',
+    'China Mainland': 'China Mainland',
+    'EU, UK, Switzerland and selected other countries': 'Europe',
+    'US, Canada, Europe, Japan (expanded in June 2024 to include Latin America, Middle East, Africa)': 'Multiple Regions',
+    'Brazil and LATAM': 'Latin America',
+    'Not disclosed': 'Not Disclosed',
+    'Not Disclosed': 'Not Disclosed',
+}
+
+def normalize_usd(s: str) -> str:
+    """Extract first clean dollar figure; return 'Not Disclosed' if none."""
+    if not s:
+        return 'Not Disclosed'
+    s = s.strip()
+    if re.match(r'(not disclosed|all-stock|double.digit million|~\$250M.*all-stock)', s, re.I):
+        return 'Not Disclosed'
+    s = re.sub(r'^~', '', s)
+    m = re.search(r'\$\s*([\d,]+(?:\.\d+)?)\s*B', s, re.I)
+    if m:
+        n = round(float(m.group(1).replace(',', '')) * 1000, 1)
+        return f'${n/1000:.3g}B'
+    m = re.search(r'\$\s*([\d,]+(?:\.\d+)?)\s*M', s, re.I)
+    if m:
+        n = round(float(m.group(1).replace(',', '')), 1)
+        return f'${n:.3g}M'
+    return 'Not Disclosed'
+
+def normalize_therapeutic_area(s: str) -> str:
+    """Map raw value to canonical enum; pass through if already canonical."""
+    return TA_CANONICAL.get(s, s) if s else 'Not Disclosed'
+
+def normalize_territory(s: str) -> str:
+    """Map raw value to canonical enum; pass through if already canonical."""
+    return TERRITORY_CANONICAL.get(s, s) if s else 'Not Disclosed'
+
+
 def save_deal(deal_data: dict) -> str:
     global db, new_deals_this_run
 
@@ -427,6 +672,14 @@ def save_deal(deal_data: dict) -> str:
 
     deal_data["announcement_month_year"] = sanitize_date(
         deal_data.get("announcement_month_year", ""))
+    deal_data["therapeutic_area"] = normalize_therapeutic_area(
+        deal_data.get("therapeutic_area", ""))
+    deal_data["territory"]        = normalize_territory(
+        deal_data.get("territory", ""))
+    deal_data["upfront_usd"]      = normalize_usd(
+        deal_data.get("upfront_usd", ""))
+    deal_data["total_value_usd"]  = normalize_usd(
+        deal_data.get("total_value_usd", ""))
     deal_data["_id"]       = make_deal_id(deal_data)
     deal_data["_added_on"] = datetime.now().strftime("%Y-%m-%d")
 
@@ -442,110 +695,293 @@ def finish(summary: str) -> str:
     return f"AGENT_DONE: {summary}"
 
 def run_tool(name: str, inp: dict) -> str:
-    if name == "search_web": return search_web(**inp)
-    if name == "save_deal":  return save_deal(inp)
-    if name == "finish":     return finish(**inp)
+    if name == "search_web":       return search_web(**inp)
+    if name == "search_web_wide":  return search_web_wide(**inp)
+    if name == "search_web_cn":    return search_web_cn(**inp)
+    if name == "save_deal":        return save_deal(inp)
+    if name == "finish":           return finish(**inp)
     return f"Unknown tool: {name}"
+
+def build_company_list(existing_deals: list, search_window: str = "") -> str:
+    """
+    Builds the Round 2 company list dynamically from the live database.
+    Companies are ranked by deal count so the agent searches the most productive
+    ones first. New companies discovered in previous runs are automatically included.
+    """
+    from collections import Counter
+
+    # Extract canonical company names and count deals per company
+    counts = Counter()
+    for d in existing_deals:
+        cp = d.get('chinese_party', '').strip()
+        if cp and cp != 'Unknown Chinese firm':
+            counts[canon_company(cp)] += 1
+
+    # Resolve canon key back to the best display name in the DB
+    # (pick the most frequent actual name string for each canon key)
+    canon_to_display = {}
+    name_freq = Counter()
+    for d in existing_deals:
+        cp = d.get('chinese_party', '').strip()
+        if cp:
+            key = canon_company(cp)
+            name_freq[(key, cp)] += 1
+    for (key, name), freq in name_freq.items():
+        if key not in canon_to_display or freq > name_freq[(key, canon_to_display[key])]:
+            canon_to_display[key] = name
+
+    # Extract year hint from search_window for query suffix
+    import re
+    yr_match = re.search(r'\b(20\d{2})\b', search_window)
+    yr = yr_match.group(1) if yr_match else "2024 2025"
+
+    # Bucket into tiers
+    tier1 = [(canon_to_display.get(k, k), n) for k, n in counts.most_common() if n >= 5]
+    tier2 = [(canon_to_display.get(k, k), n) for k, n in counts.most_common() if 2 <= n < 5]
+    tier3 = [(canon_to_display.get(k, k), n) for k, n in counts.most_common() if n == 1]
+
+    def fmt_queries(companies, per_line=3):
+        queries = [f'"{name} deal {yr}"' for name, _ in companies]
+        lines = []
+        for i in range(0, len(queries), per_line):
+            lines.append("    " + ", ".join(queries[i:i+per_line]))
+        return "\n".join(lines)
+
+    lines = [
+        "ROUND 2 — COMPANY-SPECIFIC SEARCHES",
+        f"  This list is auto-generated from the live database ({len(counts)} companies, ranked by deal count).",
+        f"  New companies found in previous runs are automatically included here.",
+        "",
+    ]
+    if tier1:
+        lines.append(f"  Tier 1 – Most active ({len(tier1)} companies, 5+ deals each):")
+        lines.append(fmt_queries(tier1))
+    if tier2:
+        lines.append(f"  Tier 2 – Active ({len(tier2)} companies, 2-4 deals each):")
+        lines.append(fmt_queries(tier2))
+    if tier3:
+        lines.append(f"  Tier 3 – Single deal on record ({len(tier3)} companies — search these too):")
+        lines.append(fmt_queries(tier3, per_line=4))
+
+    return "\n".join(lines)
+
 
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
-def build_system_prompt(existing_deals: list, search_window: str = "") -> str:
-    recent = "\n".join(
-        f"- {d.get('chinese_party')} / {d.get('asset')} / {d.get('deal_type')} ({d.get('announcement_month_year','')})"
-        for d in existing_deals[-15:]
-    ) or "None yet — this is the first run."
+def build_system_prompt(existing_deals: list, search_window: str = "",
+                        completed_queries: list = None) -> str:
+    # Compact already-saved list — just cp/drug/month, capped at 20 entries
+    saved_summary = "\n".join(
+        f"{d.get('chinese_party','?')}/{d.get('drug_name') or d.get('asset','?')[:25]}/{d.get('announcement_month_year','?')}"
+        for d in existing_deals[-20:]
+    ) or "None yet."
 
-    window_str = search_window if search_window else "Search for deals from all time."
+    window_str = search_window if search_window else "Search all time."
+
+    # Build dynamic company list from live DB
+    company_round = build_company_list(existing_deals, search_window)
+
+    # Compact query log — tells Claude exactly what it has already searched
+    if completed_queries:
+        query_log = (
+            f"SEARCHES ALREADY COMPLETED THIS SESSION ({len(completed_queries)} total — do NOT repeat these):\n" +
+            "\n".join(f"  ✓ {q}" for q in completed_queries)
+        )
+    else:
+        query_log = "SEARCHES ALREADY COMPLETED THIS SESSION: none yet — this is the first search."
+
     return f"""You are a senior biopharma deal analyst specializing in China life science transactions.
 
-DATABASE: {len(existing_deals)} deals already saved. Do NOT re-save these:
-{recent}
+DATABASE: {len(existing_deals)} deals already saved. Do NOT re-save anything already here:
+{saved_summary}
 
 YOUR MISSION: Find NEW deals not listed above and save them using save_deal().
-
 SEARCH WINDOW: {window_str}
 
-## CRITICAL RULES — READ CAREFULLY
+{query_log}
 
-**SAVE AGGRESSIVELY.** After EVERY search, immediately call save_deal() for each deal found.
-Do NOT wait to gather more info. Do NOT skip a deal because some fields are uncertain.
+═══════════════════════════════════════════════════
+ CRITICAL RULES
+═══════════════════════════════════════════════════
+
+**SAVE AGGRESSIVELY.** After EVERY search, immediately call save_deal() for EACH deal found.
+Do NOT wait. Do NOT skip a deal because some fields are uncertain.
 Use "Not disclosed" for any financial fields you cannot find.
 
-**SAVE AFTER EVERY SEARCH.** The pattern must be:
-  search → save all deals found → search → save all deals found → ... → finish()
+**USE ALL YOUR STEPS.** Do NOT call finish() until you have done AT LEAST 15 searches.
+You have a generous step budget — use every single step productively.
+Calling finish() early wastes the budget and leaves deals unfound.
 
-**MINIMUM 2 SEARCHES before calling finish(). Target 5-8 searches total.**
+**SAVE AFTER EVERY SEARCH.** The only valid pattern is:
+  search → save ALL deals found → search → save ALL deals found → ... (repeat 15+ times) → finish()
 
-**ONLY save deals where a Chinese company is a party.** This includes ALL of the following structures:
+═══════════════════════════════════════════════════
+ DEAL TYPES — save ALL of these structures
+═══════════════════════════════════════════════════
 
 | Structure | deal_type | How to recognise it |
 |-----------|-----------|---------------------|
-| Chinese company grants rights to foreign pharma | licensing-out | "X licensed drug Y to Z for $..." |
-| Foreign pharma pays option fee for right to license | option-to-license | "option", "right to license", "option agreement" in headline |
-| Investors create NewCo to hold Chinese assets | newco-spinout | "backed", "new company", "NewCo", "spinout" — Chinese licensor is chinese_party |
-| Access to a technology platform, not a specific drug | platform-deal | "AI platform", "linker technology", "delivery platform", "discovery collaboration" |
-| Chinese company buys rights from foreign party | licensing-in | Chinese company is acquirer of foreign IP |
-| Joint R&D sharing costs/rights | co-development | "co-develop", "joint development", "shared rights" |
-| Full company or subsidiary purchase | M&A / acquisition | "acquires", "buys", "merger" |
+| Chinese company grants rights to foreign pharma | licensing-out | "X licensed Y to Z for $..." |
+| Foreign pharma pays option fee for right to later license | option-to-license | "option", "right to license", "option agreement" |
+| Investors create NewCo to hold Chinese assets | newco-spinout | "NewCo", "backed by", "spinout", "new company formed" |
+| Access to a technology platform (not a specific drug) | platform-deal | "AI platform", "ADC platform", "linker tech", "discovery collab" |
+| Chinese company acquires rights from foreign party | licensing-in | Chinese company is the buyer of foreign IP |
+| Joint R&D sharing costs/rights equally | co-development | "co-develop", "joint development" |
+| Full company or asset acquisition | acquisition | "acquires", "buys", "merger" |
 
-**For newco-spinout:** set chinese_party = the Chinese licensor (e.g. Hengrui), foreign_party = the NewCo name + backers (e.g. "Hercules CM NewCo (Bain Capital, RTW, Atlas)")
-**For option-to-license:** record the option fee in upfront_usd; note in highlights if a full license was later exercised
-**For platform-deal:** set asset = the platform description; drug_name = platform name or technology type
-**For equity_component:** always fill this in — e.g. "~20% equity stake in NewCo", "$100M equity investment", or "None"
+═══════════════════════════════════════════════════
+ FIELD GUIDE
+═══════════════════════════════════════════════════
 
-**DO NOT save:**
-- Policy articles, drug pricing news, MFN, legislation, FDA approvals without a deal
-- Clinical trial results with no licensing/acquisition component
-- Pure fundraising rounds where no Chinese company is licensing/selling an asset
-- Opinion pieces, editorials, or industry analysis
-- Articles where you cannot identify a specific Chinese company as a named party
-
-**A valid deal must have:** a named Chinese company + a named asset/drug + a deal type (licensing/M&A/partnership).
-If any of these three are missing, do NOT call save_deal().
-
-**For each deal, fill in what you know:**
-- announcement_month_year: "Month YYYY" (e.g. "March 2024") — use the article date if deal date unclear
-- deal_type: pick the MOST SPECIFIC type —
-    licensing-out | licensing-in | option-to-license | newco-spinout | platform-deal | co-development | partnership | M&A | acquisition
-- equity_component: any equity stake involved, e.g. "~20% stake in Hercules NewCo" or "None"
-- chinese_party: the Chinese company name
-- foreign_party: the non-Chinese company, or "N/A"
-- asset: drug name or target with full context (e.g. "ivonescimab (PD-1/VEGF bispecific antibody for NSCLC)")
-- drug_name: short canonical name only — INN, internal code, or target (e.g. "ivonescimab", "HRS-5346", "SSGJ-707"). No descriptions, no parentheses.
-- modality: drug class — Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC / Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide / Oligonucleotide / Other
-- therapeutic_area: specific (e.g. "Oncology – NSCLC", "Immunology – Autoimmune")
+- announcement_month_year: "Month YYYY" e.g. "March 2024"
+- deal_type: pick from enum — licensing-out | licensing-in | option-to-license | newco-spinout | platform-deal | co-development | partnership | M&A | acquisition
+- chinese_party: Chinese company name
+- foreign_party: non-Chinese partner (or NewCo name + backers)
+- asset: drug code + target + indication e.g. "HRS-5346 (oral Lp(a) inhibitor, cardiovascular)"
+- drug_name: code only — "HRS-5346" or "ivonescimab". No descriptions.
+- modality: Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC / Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide / Oligonucleotide / Other
+- therapeutic_area: pick the CLOSEST value from this fixed list —
+    Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
+    Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
+    Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
+    Immunology – Atopic Dermatitis | Immunology – Inflammatory Bowel Disease |
+    Immunology – Lupus / Nephrology | Immunology – Asthma / Allergic Disorders |
+    Immunology – Psoriasis / Inflammatory | Immunology – Multiple Indications |
+    Metabolic – Obesity | Metabolic – Diabetes | Metabolic – Cardiometabolic | Metabolic – MASH / Liver |
+    Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
+    Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
+    Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
+  Use "Oncology – Solid Tumors" for broad solid-tumor assets. Use "Oncology – Multiple Indications" only when the deal explicitly spans several distinct tumor types.
 - stage: Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
-- total_value_usd: e.g. "$1.2B" or "Not disclosed"
-- upfront_usd: e.g. "$100M" or "Not disclosed"
-- territory: e.g. "Global ex-China", "US & Europe", "Worldwide"
-- highlights: 2-3 sentences — why notable? strategic rationale? standout terms?
-- source_url: the article URL
-- source_name: FierceBiotech / Endpoints News / BioPharma Dive / Reuters / Bloomberg / STAT News
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed". Strip all qualifiers — no parenthetical notes, no "+" suffix.
+- territory: Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
+  Use "Global ex-China" for rights excluding mainland China/HK/Macau/Taiwan. Use "Global" when "Worldwide" is stated with no exclusions.
+- equity_component: e.g. "~20% stake in NewCo" or "None"
+- highlights: ONE sentence max — most notable fact (value, strategic angle, or record term)
+- source_url / source_name: article URL and publication name
 
-## SEARCH STRATEGY — cover ALL deal structures
+Do NOT save: policy/pricing articles, pure fundraising rounds, clinical results without a deal,
+opinion pieces, or any item missing a named Chinese company + named drug/asset.
 
-Use a MIX of these query types across your searches to catch different deal structures:
+═══════════════════════════════════════════════════
+ SEARCH STRATEGY — MANDATORY SEQUENCE
+═══════════════════════════════════════════════════
 
-**Standard licensing:**    "China biotech out-licensing deal 2025"
-**ADC / modality:**        "Chinese pharma ADC licensing deal 2024 2025"
-**Option deals:**          "China biotech option agreement 2024 2025"
-**NewCo / spinouts:**      "new biotech backed China drug license 2024 2025" OR "spinout China pharma assets investors"
-**Platform deals:**        "China AI drug discovery platform deal" OR "Chinese biotech platform collaboration"
-**Equity combos:**         "China pharma equity stake licensing deal"
-**Specific therapy areas:** "China obesity GLP-1 licensing" / "China immunology deal" / "China CNS drug deal"
+TOOL USAGE RULE:
+  • search_web_wide  → your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7)
+                       No domain restrictions — catches deals on press wires, IR pages,
+                       regional sites, and anywhere not covered by top-tier press.
+  • search_web       → ONLY used in ROUND 2 (priority source deep-dives)
+                       Scoped to FierceBiotech / Endpoints / BioPharma Dive / Reuters etc.
+                       Use AFTER wide discovery to get richer detail on already-found deals
+                       AND to catch any megadeals that only appeared in premium outlets.
+  • search_web_cn    → ONLY used in ROUND 6 for Mandarin-language sources.
 
-## EXAMPLE WORKFLOW (follow this pattern exactly):
+You MUST work through ALL of the following query categories in order.
+Do NOT repeat a query type you've already used. Keep a mental checklist.
 
-Step 1: search_web("China biotech out-licensing deal 2025 fiercebiotech")
-Step 2: save_deal({{...}}) for EACH deal found — use correct deal_type for each
-Step 3: search_web("China biotech option agreement spinout NewCo 2024 2025")
-Step 4: save_deal({{...}}) for EACH new deal found
-Step 5: search_web("China AI platform deal collaboration biopharma 2025")
-Step 6: save_deal({{...}}) for EACH new deal found
-... repeat with other query types ...
-Final step: finish(summary="Found and saved X deals")
+ROUND 1 — MONTHLY SWEEPS via search_web_wide (12 searches)
+Wide search for each month — catches the broadest possible set of deals:
+  "China biopharma licensing deal January 2024"
+  "China biopharma licensing deal February 2024"
+  ... (March through December)
+Each monthly search will surface different deals. Save ALL deals found in each.
 
-Call finish() when you have done at least 5 searches."""
+{company_round}
+
+ROUND 3 — MODALITY / THERAPY SWEEPS via search_web_wide
+  "China ADC licensing deal 2024"
+  "China bispecific antibody licensing 2024"
+  "China GLP-1 obesity drug deal 2024"
+  "China KRAS inhibitor deal 2024"
+  "China CAR-T cell therapy licensing 2024"
+  "China siRNA oligonucleotide deal 2024"
+
+ROUND 4 — PARTNER-FOCUSED via search_web_wide (search by the Western buyer)
+  "AstraZeneca China licensing deal 2024"
+  "Pfizer China biotech deal 2024"
+  "Bristol Myers Squibb China deal 2024"
+  "Merck MSD China licensing 2024"
+  "Johnson & Johnson China biotech 2024"
+
+ROUND 5 — STRUCTURE SEARCHES via search_web_wide
+  "China biotech NewCo spinout 2024"
+  "China biopharma option agreement deal 2024"
+  "China licensing deal under $200M 2024"    ← catches smaller deals missed by megadeal coverage
+
+ROUND 6 — CHINESE-LANGUAGE SEARCHES (use search_web_cn for these)
+Search in Mandarin to find deals that never got English press coverage.
+These catch the ~50% of deals that only appear in Chinese sources:
+  "中国生物科技 对外授权 2024"               (China biotech outbound licensing 2024)
+  "医药 license-out 交易 2024"              (pharma license-out deals 2024)
+  "普方生物 Genmab 授权"                    (ProFoundBio Genmab deal)
+  "启愈生物 J&J 授权"                       (Proteologix J&J deal)
+  "奇璞生物 授权交易 2024"                  (smaller company deals 2024)
+  "中国创新药 BD交易 2024 临床前"            (China innovative drug BD deals 2024 preclinical)
+  "生物技术公司 跨境授权 2024"               (biotech cross-border licensing 2024)
+  "新药 license out 里程碑 2024"            (new drug license-out milestones 2024)
+
+ROUND 7 — CHINA-HQ COMPANIES WITH ENGLISH-SOUNDING NAMES via search_web_wide
+Many active China deal-makers have names that don't signal their Chinese origin.
+Use two complementary approaches:
+
+  City-cluster searches (catches unknown companies in active hubs):
+    "Shanghai biotech licensing deal 2024"
+    "Suzhou biotech licensing deal 2024"
+    "Nanjing biotech deal 2024"
+    "Beijing biopharmaceutical licensing 2024"
+    "Hangzhou biotech deal 2024"
+    "Chengdu Zhuhai biotech licensing 2024"
+
+  China-based VC portfolio searches (these VCs back most China-HQ English-named biotechs):
+    "OrbiMed China portfolio biotech deal 2024"
+    "6 Dimensions Capital portfolio licensing 2024"
+    "Lilly Asia Ventures portfolio company deal 2024"
+    "Hillhouse Capital biotech licensing deal 2024"
+
+  Known China-HQ English-named companies not yet in DB — search directly:
+    "Allorion Therapeutics deal 2024", "AnHearts licensing 2024",
+    "Biotheus deal 2024", "BridGene Biosciences deal 2024",
+    "Chimagen GSK deal 2024", "Eccogene licensing 2024",
+    "Epimab BioTherapeutics deal 2024", "FutureGen deal 2024",
+    "InSilico Medicine licensing 2024", "Jemincare deal 2024",
+    "Proteologix licensing 2024", "ProFoundBio Genmab 2024",
+    "Regor Therapeutics deal 2024", "SanReno Therapeutics deal 2024",
+    "Triastek BioNTech deal 2024", "VelaVigo deal 2024"
+
+  NOTE on tagging: When saving deals from these companies, set
+  chinese_hq = "Yes" so they are correctly classified despite their English names.
+
+ROUND 8 — PRIORITY SOURCE DEEP-DIVES via search_web (scoped to top publications)
+Run the highest-yield queries again through priority sources to catch any deals
+that only appeared in premium outlets and were missed by the wide pass:
+  "China biopharma licensing deal 2024 site:fiercebiotech.com"
+  "China licensing deal 2024 site:endpointsnews.com"
+  "China biotech deal 2024 site:biopharmadive.com"
+  "China licensing 2024 site:reuters.com"
+  "China biotech deal 2024 site:statnews.com"
+
+═══════════════════════════════════════════════════
+ SEARCH BUDGET REMINDER
+═══════════════════════════════════════════════════
+
+Your budget is measured in SEARCHES (any search tool call), not total API calls.
+Save calls are free — do as many save_deal() calls as you need after each search.
+
+- Searches 1-12:   Monthly sweeps — search_web_wide (ROUND 1)
+- Searches 13-32:  Company-specific — search_web_wide (ROUND 2)
+- Searches 33-38:  Modality/therapy — search_web_wide (ROUND 3)
+- Searches 39-43:  Partner-focused — search_web_wide (ROUND 4)
+- Searches 44-46:  Structure searches — search_web_wide (ROUND 5)
+- Searches 47-54:  Chinese-language — search_web_cn (ROUND 6)
+- Searches 55-70:  China-HQ English-named — search_web_wide (ROUND 7)
+- Searches 71-75:  Priority source deep-dives — search_web (ROUND 8)
+- Final:           finish() — only after ALL rounds complete
+
+After EACH search call, immediately call save_deal() for EVERY deal
+in the results before doing the next search. Save calls are free.
+
+DO NOT call finish() before completing at least ROUND 1, ROUND 2, and ROUND 7."""
 
 # ── Agent Loop ─────────────────────────────────────────────────────────────────
 
@@ -590,70 +1026,64 @@ def trim_messages(messages: list, keep_first: int = 1, keep_last: int = 6) -> li
     return trimmed
 
 
-def run_agent(goal: str, search_window: str = ""):
+def run_agent(goal: str, search_window: str = "", max_steps: int = MAX_STEPS):
     print(f"\n{'='*60}")
     print(f"  CHINA BIOPHARMA DEAL AGENT  v2")
     print(f"  Existing deals in DB: {len(db['deals'])}")
+    print(f"  Search budget: {max_steps} searches")
     print(f"{'='*60}\n")
 
-    messages = [{"role": "user", "content": goal}]
-    step     = 0
-    done     = False
+    messages          = [{"role": "user", "content": goal}]
+    searches          = 0
+    api_calls         = 0
+    done              = False
+    completed_queries = []   # every search query that has been run this session
 
-    while step < MAX_STEPS and not done:
-        step += 1
-        print(f"[Step {step}] Calling Claude...")
+    while searches < max_steps and not done:
+        api_calls += 1
+        print(f"[API call {api_calls} | Searches used: {searches}/{max_steps}] Calling Claude...")
 
-        # Trim context window BEFORE each API call to keep token count low.
-        # We keep the original goal + the last 6 messages (3 round-trips).
-        # The system prompt holds all saved-deal context so nothing is lost.
-        trimmed_messages = trim_messages(messages, keep_first=1, keep_last=6)
+        trimmed_messages = trim_messages(messages, keep_first=1, keep_last=8)
 
         try:
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=4096,
-                system=build_system_prompt(db["deals"], search_window),
+                max_tokens=8192,
+                system=build_system_prompt(db["deals"], search_window, completed_queries),
                 tools=TOOLS,
                 messages=trimmed_messages
             )
 
         except anthropic.RateLimitError as e:
-            # 429 — hit the per-minute token limit
             print(f"\n  [Rate limit hit: {e}]")
             print(f"  Waiting 60 seconds before retrying...")
             import time
-            time.sleep(62)          # wait just over a minute for the window to reset
-            print(f"  Retrying step {step}...")
+            time.sleep(62)
+            print(f"  Retrying...")
             try:
                 response = client.messages.create(
                     model=MODEL,
-                    max_tokens=4096,
-                    system=build_system_prompt(db["deals"], search_window),
+                    max_tokens=8192,
+                    system=build_system_prompt(db["deals"], search_window, completed_queries),
                     tools=TOOLS,
                     messages=trimmed_messages
                 )
             except anthropic.RateLimitError as e2:
-                print(f"  [Rate limit hit again after retry — saving what we have and stopping]")
-                print(f"  Error: {e2}")
+                print(f"  [Rate limit hit again — saving what we have and stopping]")
                 break
 
         except anthropic.APIError as e:
-            print(f"\n  [API error at step {step}: {e}]")
-            print(f"  Saving what we have and stopping.")
+            print(f"\n  [API error: {e}]")
             break
 
-        # Always record the full assistant turn in history
         messages.append({"role": "assistant", "content": response.content})
 
-        # Collect every tool_use block regardless of stop_reason
         tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
         if not tool_use_blocks:
             print("  [No tool calls — agent done]")
             break
 
-        # Execute all tools and collect results in one batch
         tool_results  = []
         called_finish = False
 
@@ -672,19 +1102,23 @@ def run_agent(goal: str, search_window: str = ""):
                 "content":     str(result)
             })
 
+            if block.name in ("search_web", "search_web_cn", "search_web_wide"):
+                searches += 1
+                completed_queries.append(block.input.get("query", ""))
             if block.name == "finish":
                 called_finish = True
 
-        # Send ALL results back as one user message
         messages.append({"role": "user", "content": tool_results})
 
         if called_finish:
             done = True
 
-    save_database(db, mark_run=True)   # stamp last_run_date after each agent run
+    save_database(db, mark_run=True)
     print(f"\n{'='*60}")
     print(f"  New deals this run:      {len(new_deals_this_run)}")
     print(f"  Total deals in database: {len(db['deals'])}")
+    print(f"  Searches performed:      {searches}")
+    print(f"  Total API calls:         {api_calls}")
     print(f"{'='*60}\n")
 
 # ── Dashboard Generator ────────────────────────────────────────────────────────
@@ -1272,6 +1706,454 @@ def generate_csv(db: dict):
     print(f"CSV written     -> {CSV_PATH.resolve()}")
 
 
+# ── CSV Import Mode ────────────────────────────────────────────────────────────
+
+# Flexible column aliases — maps whatever the user put in their CSV header
+# to our internal field names.  Add more synonyms here as needed.
+_CSV_COL_ALIASES = {
+    # chinese_party
+    "chinese party":    "chinese_party",
+    "chinese_party":    "chinese_party",
+    "chinese company":  "chinese_party",
+    "china company":    "chinese_party",
+    "licensor":         "chinese_party",
+    "seller":           "chinese_party",
+    # foreign_party
+    "foreign party":    "foreign_party",
+    "foreign_party":    "foreign_party",
+    "counterparty":     "foreign_party",
+    "other party":      "foreign_party",
+    "partner":          "foreign_party",
+    "licensee":         "foreign_party",
+    "buyer":            "foreign_party",
+    "western party":    "foreign_party",
+    # asset / drug
+    "lead asset":       "asset",
+    "asset":            "asset",
+    "drug":             "asset",
+    "drug name":        "drug_name",
+    "drug_name":        "drug_name",
+    "compound":         "drug_name",
+    "molecule":         "drug_name",
+    # date / year
+    "ann. date":        "date_hint",
+    "announcement date":"date_hint",
+    "date":             "date_hint",
+    "year":             "date_hint",
+    "year-month":       "date_hint",
+    # financials
+    "upfront (usd)":    "upfront_usd",
+    "upfront":          "upfront_usd",
+    "upfront usd":      "upfront_usd",
+    "milestones / total":"total_value_usd",
+    "total":            "total_value_usd",
+    "total value":      "total_value_usd",
+    "deal value":       "total_value_usd",
+    # stage
+    "stage":            "stage",
+    "clinical stage":   "stage",
+    # modality
+    "modality":         "modality",
+    "drug type":        "modality",
+    "molecule type":    "modality",
+    # therapeutic area
+    "therapeutic area": "therapeutic_area",
+    "indication":       "therapeutic_area",
+    "disease area":     "therapeutic_area",
+    "ta":               "therapeutic_area",
+    # deal type
+    "deal type":        "deal_type",
+    "deal_type":        "deal_type",
+    "structure":        "deal_type",
+    "transaction type": "deal_type",
+    # territory
+    "territory":        "territory",
+    "geography":        "territory",
+    "rights":           "territory",
+    # extra freeform hints passed through as-is
+    "notes":            "notes",
+    "description":      "notes",
+    "comments":         "notes",
+}
+
+def parse_csv_file(path: str) -> list[dict]:
+    """
+    Parse a user-supplied CSV into a list of row dicts with normalised field names.
+    Returns one dict per data row; skips blank rows.
+    """
+    import csv as _csv
+    # Column names that are just row-number counters — skip entirely
+    _SKIP_COLS = {"#", "no", "no.", "row", "row#", "id", "index", "num", "number", "s/n", "sn"}
+    _EMPTY_VALS = {"—", "nan", "NaN", "N/A", "n/a", "none", "None", "-", ""}
+    rows = []
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = _csv.DictReader(fh)
+        for raw_row in reader:
+            row: dict[str, str] = {}
+            for col, val in raw_row.items():
+                col_clean = col.strip()
+                if col_clean.lower() in _SKIP_COLS:
+                    continue
+                key = _CSV_COL_ALIASES.get(col_clean.lower(), col_clean.lower())
+                val = val.strip() if val else ""
+                if val and val not in _EMPTY_VALS:
+                    if key not in row or not row[key]:
+                        row[key] = val
+            if any(row.values()):
+                rows.append(row)
+    return rows
+
+
+def _fmt_row_for_prompt(row: dict) -> str:
+    """Render one CSV row as a compact key:value block for the system prompt."""
+    lines = []
+    label_map = {
+        "chinese_party":    "Chinese party",
+        "foreign_party":    "Foreign party",
+        "asset":            "Asset/drug",
+        "drug_name":        "Drug code",
+        "date_hint":        "Date hint",
+        "upfront_usd":      "Upfront USD",
+        "total_value_usd":  "Total value",
+        "stage":            "Stage",
+        "modality":         "Modality",
+        "therapeutic_area": "Therapeutic area",
+        "deal_type":        "Deal type (hint)",
+        "territory":        "Territory (hint)",
+        "notes":            "Notes/extra",
+    }
+    for key, label in label_map.items():
+        v = row.get(key, "")
+        if v:
+            lines.append(f"  {label}: {v}")
+    # Any leftover columns not in label_map — pass them through as extra hints
+    known_keys = set(label_map.keys())
+    for k, v in row.items():
+        if k not in known_keys and v:
+            lines.append(f"  {k}: {v}")
+    return "\n".join(lines)
+
+
+def build_csv_row_prompt(row: dict, row_num: int, total_rows: int,
+                         existing_deals: list) -> str:
+    """
+    System prompt for a single CSV-row lookup.
+    Much tighter than the full discovery prompt — one target deal per call.
+    """
+    row_block = _fmt_row_for_prompt(row)
+
+    # Full dedup context using canonical names so Claude understands what's already saved.
+    # Show cp / drug / month for every deal — compact but complete.
+    all_saved = "\n".join(
+        f"  {canon_company(d.get('chinese_party','?'))} / "
+        f"{(d.get('drug_name') or d.get('asset','?'))[:30]} / "
+        f"{d.get('announcement_month_year','?')}"
+        for d in existing_deals
+    ) or "  (none yet)"
+
+    # Pre-compute canonical key for the CSV row to warn Claude if it looks like a dup
+    cp_canon   = canon_company(row.get("chinese_party", ""))
+    fp_canon   = canon_company(row.get("foreign_party", ""))
+    asset_hint = row.get("asset") or row.get("drug_name", "")
+
+    # Fields Claude should carry directly if found in CSV (don't search for these)
+    carry_hints = []
+    for field in ("modality", "therapeutic_area", "deal_type", "territory", "stage"):
+        v = row.get(field, "")
+        if v:
+            carry_hints.append(f"  • {field}: use \"{v}\" directly (from CSV) unless search contradicts it")
+    carry_block = "\n".join(carry_hints) if carry_hints else "  (none — infer all from search)"
+
+    return f"""You are a senior biopharma deal analyst. Your task is to look up ONE specific deal
+and save it using save_deal().
+
+═══════════════════════════════════════════════════
+ ROW {row_num} of {total_rows} — TARGET DEAL
+═══════════════════════════════════════════════════
+{row_block}
+
+═══════════════════════════════════════════════════
+ FIELDS TO CARRY DIRECTLY FROM CSV (no search needed)
+═══════════════════════════════════════════════════
+{carry_block}
+
+═══════════════════════════════════════════════════
+ YOUR TASK
+═══════════════════════════════════════════════════
+
+1. Build a tight search query combining:
+     [chinese_party] + [foreign_party] + [asset/drug name] + [year from date_hint if present]
+   Example: "Hengrui Ideaya SHR-4849 licensing deal 2024"
+
+   If the first English search finds nothing useful, try:
+     a) A broader query (just company names + year)
+     b) search_web_cn with Mandarin: "[Chinese company] [drug] 授权 [year]"
+   You have up to {3} searches max. Stop after that regardless.
+
+2. Save exactly ONE deal using save_deal() — the deal described in the row above.
+   - If you find the deal: fill in ALL fields as completely as possible from the article.
+   - Prefer the article's data over the CSV where they differ (articles have fuller context).
+   - But use the CSV values as ground truth for: chinese_party, foreign_party, asset/drug_name,
+     upfront_usd (if numeric), and any carry-through fields listed above.
+   - If you cannot confirm after {3} searches: still call save_deal() using whatever
+     the CSV provides. Mark unconfirmed fields "Not disclosed". Do NOT invent facts.
+
+3. After saving (or after {3} failed searches), call finish().
+
+═══════════════════════════════════════════════════
+ FIELD GUIDE (same schema as always)
+═══════════════════════════════════════════════════
+
+- announcement_month_year: "Month YYYY" e.g. "March 2024". If only year known, use "January YYYY".
+- deal_type: licensing-out | licensing-in | option-to-license | newco-spinout |
+             platform-deal | co-development | partnership | M&A | acquisition
+- chinese_party:    use EXACTLY the name from the CSV row (only fix spelling/punctuation)
+- foreign_party:    use EXACTLY the name from the CSV row (only fix spelling/punctuation)
+- asset:            drug code + target + indication e.g. "SHR-1819 (TSLP mAb, asthma)"
+- drug_name:        code only — "SHR-1819". No descriptions.
+- modality:         Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC /
+                    Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide /
+                    Oligonucleotide / Other
+- therapeutic_area: pick the CLOSEST value from this fixed list —
+    Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
+    Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
+    Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
+    Immunology – Atopic Dermatitis | Immunology – Inflammatory Bowel Disease |
+    Immunology – Lupus / Nephrology | Immunology – Asthma / Allergic Disorders |
+    Immunology – Psoriasis / Inflammatory | Immunology – Multiple Indications |
+    Metabolic – Obesity | Metabolic – Diabetes | Metabolic – Cardiometabolic | Metabolic – MASH / Liver |
+    Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
+    Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
+    Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
+  Use "Oncology – Solid Tumors" for broad solid-tumor assets. Use "Oncology – Multiple Indications" only when the deal explicitly spans several distinct tumor types.
+- stage:            Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed". Strip all qualifiers — no parenthetical notes, no "+" suffix.
+- territory:        Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
+  Use "Global ex-China" for rights excluding mainland China/HK/Macau/Taiwan. Use "Global" when "Worldwide" is stated with no exclusions.
+- chinese_hq:       "Yes" / "No" / "Unknown" — set "Yes" even for English-sounding
+                    China-founded companies (ProFoundBio, Regor, AnHearts, LaNova, etc.)
+- highlights:       ONE sentence — most notable fact about this deal
+- source_url / source_name: article URL and publication name
+
+═══════════════════════════════════════════════════
+ DEALS ALREADY IN DATABASE — DO NOT RE-SAVE THESE
+═══════════════════════════════════════════════════
+Format: canonical_chinese_party / drug_or_asset / month_year
+{all_saved}
+
+NOTE: The deduplication system uses canonical company names, so "Hengrui Pharma" and
+"Jiangsu Hengrui Pharmaceuticals" count as the same company. If the deal you're looking
+up is clearly already present above (same companies + same asset + same timeframe), call
+finish() without saving — do NOT save a duplicate.
+
+═══════════════════════════════════════════════════
+ CRITICAL
+═══════════════════════════════════════════════════
+
+- You MUST call save_deal() exactly once (or confirm duplicate and skip), then finish().
+- Do NOT save unrelated deals found while searching — only the one described above.
+- The deduplication system will catch accidental duplicates, so when in doubt, save."""
+
+
+def run_csv_import(csv_path: str, max_searches_per_row: int = 3):
+    """
+    CSV import mode: reads every row from csv_path and runs a focused
+    mini-agent loop for each one (up to max_searches_per_row searches per row).
+    Uses the same save_deal() / is_duplicate() / canon_company() pipeline
+    as the normal discovery mode — guarantees consistency.
+    """
+    import csv as _csv
+
+    rows = parse_csv_file(csv_path)
+    if not rows:
+        print(f"  [CSV import] No data rows found in {csv_path}")
+        return
+
+    print(f"\n{'='*60}")
+    print(f"  CSV IMPORT MODE")
+    print(f"  File:            {csv_path}")
+    print(f"  Rows to process: {len(rows)}")
+    print(f"  Max searches/row: {max_searches_per_row}")
+    print(f"  Existing deals:  {len(db['deals'])}")
+    print(f"{'='*60}\n")
+
+    saved_count    = 0
+    skipped_count  = 0
+    api_calls      = 0
+
+    for row_idx, row in enumerate(rows, start=1):
+        cp_hint    = row.get("chinese_party", "?")
+        fp_hint    = row.get("foreign_party", "?")
+        asset_hint = row.get("asset") or row.get("drug_name", "?")
+        print(f"\n--- Row {row_idx}/{len(rows)}: {cp_hint} → {fp_hint} | {asset_hint} ---")
+
+        # Build the initial user message as a specific search instruction
+        # so Claude knows exactly what it's looking for from the very first message.
+        user_msg = (
+            f"Look up and save this specific deal:\n"
+            f"{_fmt_row_for_prompt(row)}\n\n"
+            f"Search for it, fill in all fields you can find, then call save_deal() "
+            f"followed by finish()."
+        )
+
+        messages   = [{"role": "user", "content": user_msg}]
+        searches   = 0
+        row_done   = False
+        row_saved  = False
+
+        while searches < max_searches_per_row and not row_done:
+            api_calls += 1
+            try:
+                response = client.messages.create(
+                    model=MODEL,
+                    max_tokens=4096,
+                    system=build_csv_row_prompt(row, row_idx, len(rows), db["deals"]),
+                    tools=TOOLS,
+                    messages=messages
+                )
+            except anthropic.RateLimitError:
+                import time
+                print("  [Rate limit — waiting 60s]")
+                time.sleep(62)
+                try:
+                    response = client.messages.create(
+                        model=MODEL,
+                        max_tokens=4096,
+                        system=build_csv_row_prompt(row, row_idx, len(rows), db["deals"]),
+                        tools=TOOLS,
+                        messages=messages
+                    )
+                except anthropic.RateLimitError:
+                    print("  [Rate limit again — skipping row]")
+                    skipped_count += 1
+                    row_done = True
+                    continue
+            except anthropic.APIError as e:
+                print(f"  [API error: {e}] — skipping row")
+                skipped_count += 1
+                row_done = True
+                continue
+
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_blocks = [b for b in response.content if b.type == "tool_use"]
+            if not tool_blocks:
+                print("  [No tool calls — row done]")
+                row_done = True
+                continue
+
+            tool_results = []
+            for block in tool_blocks:
+                print(f"  -> {block.name}({str(block.input)[:120]}...)")
+                try:
+                    result = run_tool(block.name, block.input)
+                except Exception as e:
+                    result = f"Tool error: {e}"
+                print(f"  <- {str(result)[:160]}")
+
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": block.id,
+                    "content":     str(result)
+                })
+
+                if block.name in ("search_web", "search_web_cn", "search_web_wide"):
+                    searches += 1
+                if block.name == "save_deal":
+                    row_saved = True
+                    saved_count += 1
+                if block.name == "finish":
+                    row_done = True
+
+            messages.append({"role": "user", "content": tool_results})
+
+        # If the agent never saved despite exhausting its search budget,
+        # build a fallback deal directly from the CSV row so no row is silently lost.
+        if not row_saved:
+            print(f"  [No save after {searches} searches — writing CSV-sourced fallback]")
+            fallback = _build_fallback_deal(row)
+            result = save_deal(fallback)
+            print(f"  [Fallback] {result}")
+            if "Saved" in result:
+                saved_count += 1
+            else:
+                skipped_count += 1
+
+        # Brief progress report after each row
+        print(f"  [Row {row_idx} done | searches: {searches} | "
+              f"DB total: {len(db['deals'])} | new this import: {len(new_deals_this_run)}]")
+
+    save_database(db, mark_run=True)
+    print(f"\n{'='*60}")
+    print(f"  CSV import complete")
+    print(f"  Rows processed:          {len(rows)}")
+    print(f"  Deals saved (new):       {saved_count}")
+    print(f"  Duplicates/skipped:      {skipped_count}")
+    print(f"  Total API calls:         {api_calls}")
+    print(f"  Total deals in database: {len(db['deals'])}")
+    print(f"{'='*60}\n")
+
+
+def _build_fallback_deal(row: dict) -> dict:
+    """
+    Build a minimal but valid deal dict directly from a CSV row,
+    used when the agent couldn't confirm the deal via search.
+    All financially uncertain fields are marked "Not disclosed".
+    """
+    date_raw = row.get("date_hint", "")
+    # Try to parse "2024-11" → "November 2024" or "2024-11-13" → "November 2024"
+    month_map = {
+        "01":"January","02":"February","03":"March","04":"April",
+        "05":"May","06":"June","07":"July","08":"August",
+        "09":"September","10":"October","11":"November","12":"December"
+    }
+    mo_yr = ""
+    date_match = re.match(r"(\d{4})-(\d{2})(?:-\d{2})?", str(date_raw))
+    if date_match:
+        yr, mo = date_match.group(1), date_match.group(2)
+        mo_yr = f"{month_map.get(mo, 'January')} {yr}"
+    elif re.match(r"20\d{2}$", str(date_raw)):
+        mo_yr = f"January {date_raw}"  # year-only → assume January as placeholder
+
+    def fmt_usd(v: str) -> str:
+        """Turn a raw number like '1800000000' into '$1.8B'."""
+        if not v or v in ("—", "nan", ""):
+            return "Not disclosed"
+        try:
+            n = float(str(v).replace(",", "").replace("$", ""))
+            if n >= 1e9:  return f"${n/1e9:.2g}B"
+            if n >= 1e6:  return f"${n/1e6:.0f}M"
+            return f"${n:,.0f}"
+        except ValueError:
+            return v if v else "Not disclosed"
+
+    upfront   = fmt_usd(row.get("upfront_usd", ""))
+    total_val = fmt_usd(row.get("total_value_usd", ""))
+
+    asset = row.get("asset") or row.get("drug_name") or "Not disclosed"
+    drug  = row.get("drug_name") or (asset.split()[0] if asset != "Not disclosed" else "Not disclosed")
+
+    return {
+        "announcement_month_year": mo_yr or "Not disclosed",
+        "deal_type":        "licensing-out",   # safest default for China outbound
+        "chinese_party":    row.get("chinese_party", "Not disclosed"),
+        "foreign_party":    row.get("foreign_party", "Not disclosed"),
+        "asset":            asset,
+        "drug_name":        drug,
+        "modality":         row.get("modality", "Not disclosed"),
+        "therapeutic_area": row.get("notes") or "Not disclosed",
+        "stage":            row.get("stage", "Not disclosed"),
+        "total_value_usd":  total_val,
+        "upfront_usd":      upfront,
+        "territory":        "Not disclosed",
+        "highlights":       f"Deal between {row.get('chinese_party','?')} and {row.get('foreign_party','?')} — details from CSV import, unconfirmed by web search.",
+        "source_url":       "https://www.nature.com/articles/d41573-025-00022-4",
+        "source_name":      "Nature (CSV import)",
+        "chinese_hq":       "Yes",
+        "_csv_fallback":    True,
+    }
+
+
 # ── Entry Point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1284,6 +2166,8 @@ Examples:
   python biopharma_agent.py -r 2025      # search only 2025 deals
   python biopharma_agent.py -r 2024 2025 # search 2024 and 2025 deals
   python biopharma_agent.py -n           # skip search, regenerate dashboard only
+  python biopharma_agent.py --csv deals.csv          # import from CSV (3 searches/row)
+  python biopharma_agent.py --csv deals.csv --csv-searches 5  # more searches per row
         """
     )
     parser.add_argument(
@@ -1292,12 +2176,60 @@ Examples:
         help="Skip the agent search — only regenerate dashboard.html from existing database"
     )
     parser.add_argument(
+        "-s", "--steps",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Number of searches to perform (default: 60). Use -s 20 for a quick run, -s 46 for full coverage."
+    )
+    parser.add_argument(
         "-r", "--range",
         nargs="+",
         metavar="YEAR",
         help="Override search window with explicit year(s), e.g. -r 2025 or -r 2024 2025"
     )
+    parser.add_argument(
+        "--csv",
+        metavar="FILE",
+        help=(
+            "CSV import mode: look up each row as a specific deal and save to database. "
+            "CSV must have a header row. Recognised columns (case-insensitive): "
+            "'Chinese Party', 'Counterparty'/'Foreign Party', 'Lead Asset'/'Drug Name', "
+            "'Stage', 'Ann. Date'/'Date', 'Upfront (USD)', 'Milestones / Total'. "
+            "Any extra columns are passed as search hints. "
+            "Example: python biopharma_agent.py --csv nature_deals.csv"
+        )
+    )
+    parser.add_argument(
+        "--csv-searches",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Max web searches per CSV row (default: 3). Increase for harder-to-find deals."
+    )
     args = parser.parse_args()
+
+    max_steps = args.steps if args.steps is not None else MAX_STEPS
+    if args.steps is not None:
+        print(f"\n  [-s] Step budget overridden: {max_steps} steps")
+
+    db = load_database()
+
+    # ── CSV import mode ───────────────────────────────────────────────────────
+    if args.csv:
+        csv_file = args.csv
+        if not Path(csv_file).exists():
+            print(f"\n  [ERROR] CSV file not found: {csv_file}")
+            import sys; sys.exit(1)
+        run_csv_import(csv_file, max_searches_per_row=args.csv_searches)
+        # Regenerate outputs after import
+        db = load_database()
+        generate_dashboard(db, f"CSV import: {Path(csv_file).name}")
+        generate_csv(db)
+        print(f"\n  Open dashboard : {DASHBOARD_PATH.resolve()}")
+        print(f"  Raw data       : {DB_PATH.resolve()}")
+        print(f"  Deals in DB    : {len(db['deals'])}\n")
+        import sys; sys.exit(0)
 
     # ── Determine search window ───────────────────────────────────────────────
     db = load_database()
@@ -1335,11 +2267,20 @@ Examples:
         window_label  = "All time (first run)"
         print("\n  [First run] No prior run date — searching all of 2024–2025")
 
+    # Build a year-aware goal that names the target years explicitly
+    if args.range:
+        year_mention = " and ".join(sorted(set(args.range)))
+        goal_window  = f"Focus specifically on {year_mention}."
+    else:
+        goal_window = "Cover 2024 and 2025 comprehensively."
+
     RESEARCH_GOAL = (
-        "Search for NEW biopharma deals involving Chinese biotech or pharma companies. "
-        "Focus on licensing, partnerships, M&A, co-development. "
-        "Prioritize FierceBiotech, Endpoints News, BioPharma Dive. "
-        "Run at least 5 different searches with varied queries."
+        f"Comprehensively research ALL biopharma deals involving Chinese biotech or pharma companies. "
+        f"{goal_window} "
+        f"You MUST run at least 15 varied searches before finishing — "
+        f"monthly sweeps first, then company-specific, then modality, then partner-focused. "
+        f"There are 90-100 China deals per year — do not stop until you have exhausted the search strategy. "
+        f"Prioritize: FierceBiotech, Endpoints News, BioPharma Dive, Reuters, STAT News."
     )
 
     if args.no_query:
@@ -1350,7 +2291,7 @@ Examples:
         db["last_search_window"] = window_label
         save_database(db)
         try:
-            run_agent(RESEARCH_GOAL, search_window)
+            run_agent(RESEARCH_GOAL, search_window, max_steps=max_steps)
         except KeyboardInterrupt:
             print("\n  [Interrupted by user]")
         except Exception as e:
