@@ -236,7 +236,7 @@ def is_duplicate(deal: dict, existing_deals: list) -> bool:
 TOOLS = [
     {
         "name": "search_web",
-        "description": "Search English-language web scoped to PRIORITY SOURCES only (FierceBiotech, Endpoints News, BioPharma Dive, Reuters, Bloomberg, STAT News). Use this for ROUND 2 (priority deep-dives) — after search_web_wide has already found candidate deals and you want authoritative confirmation or richer detail from top-tier publications.",
+        "description": "Search English-language web scoped to PRIORITY SOURCES only (FierceBiotech, Endpoints News, BioPharma Dive, Reuters, Bloomberg, STAT News). Use ONLY in ROUND 8 — after search_web_wide has already done broad discovery — to catch any deals that only appeared in premium outlets.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -245,7 +245,7 @@ TOOLS = [
     },
     {
         "name": "search_web_wide",
-        "description": "Open web search with NO domain restrictions — searches the entire web including press releases, company IR pages, biotech blogs, regional news, wire services, and any other source. Use this as your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7). Casts the widest net and catches deals that never appear in priority sources.",
+        "description": "Open web search with NO domain restrictions — searches the entire web including press releases, company IR pages, biotech blogs, regional news, and wire services. Use as your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7). Casts the widest net and catches deals that never appear in priority sources.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -472,11 +472,7 @@ def search_web_cn(query: str) -> str:
 
 
 def search_web_wide(query: str) -> str:
-    """
-    Open web search with NO domain restrictions.
-    Primary discovery tool — finds deals on press wires, company IR pages,
-    regional biotech sites, and anywhere else deals are reported.
-    """
+    """Open web search with no domain restrictions — primary discovery tool."""
     if TAVILY_API_KEY:
         try:
             resp = requests.post(
@@ -486,7 +482,6 @@ def search_web_wide(query: str) -> str:
                     "query": query,
                     "search_depth": "advanced",
                     "max_results": 8,
-                    # No include_domains — full web
                 },
                 timeout=15
             )
@@ -499,8 +494,8 @@ def search_web_wide(query: str) -> str:
                 priority = "★ PRIORITY SOURCE" if any(p in domain for p in PRIORITY_SOURCES) else ""
                 body     = r.get("content", "") or r.get("raw_content", "") or ""
                 out.append(
-                    f"{priority}\nTITLE: {r.get('title','')}\n"
-                    f"URL: {r.get('url','')}\n"
+                    f"{priority}\nTITLE: {r.get('title', '')}\n"
+                    f"URL: {r.get('url', '')}\n"
                     f"CONTENT: {body[:2000]}\n"
                 )
             return "\n---\n".join(out)
@@ -565,100 +560,239 @@ def validate_deal(deal_data: dict) -> tuple[bool, str]:
     return True, ""
 
 
-TA_CANONICAL = {
-    'Autoimmune': 'Immunology – Multiple Indications',
-    'Autoimmune / Immunology': 'Immunology – Multiple Indications',
-    'Autoimmune / Oncology – B-NHL': 'Oncology – Lymphoma / Leukemia',
-    'Autoimmune / Oncology – Multiple Myeloma': 'Oncology – Lymphoma / Leukemia',
-    'Autoimmune Diseases': 'Immunology – Multiple Indications',
-    'Cardiovascular – Cardiometabolic diseases': 'Cardiovascular – Cardiometabolic',
-    'Cardiovascular – Dyslipidemia': 'Cardiovascular – Dyslipidemia',
-    'Immunology – Allergic Disorders (food allergy, asthma, CSU)': 'Immunology – Asthma / Allergic Disorders',
-    'Immunology – Atopic Dermatitis, Asthma': 'Immunology – Atopic Dermatitis',
-    'Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps': 'Immunology – Atopic Dermatitis',
-    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)": 'Immunology – Psoriasis / Inflammatory',
-    'Immunology – Inflammatory Bowel Disease (IBD)': 'Immunology – Inflammatory Bowel Disease',
-    'Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis': 'Immunology – Lupus / Nephrology',
-    'Metabolic – Obesity / Cardiometabolic': 'Metabolic – Obesity',
-    'Metabolic – Obesity/Type 2 Diabetes': 'Metabolic – Obesity',
-    'Metabolic – Type 2 Diabetes / MASH': 'Metabolic – Diabetes',
-    'Multiple – oral RNA therapeutics': 'RNA Therapeutics – Platform',
-    'Nephrology – IgA Nephropathy': 'Nephrology – IgA Nephropathy',
-    'Not disclosed (likely Oncology based on BioNTech pipeline focus)': 'Not Disclosed',
-    'Oncology': 'Oncology – Multiple Indications',
-    'Oncology – Advanced Solid Tumors': 'Oncology – Solid Tumors',
-    'Oncology – Breast Cancer (HR+/HER2-)': 'Oncology – Breast Cancer',
-    'Oncology – Chronic Myeloid Leukemia (CML)': 'Oncology – Lymphoma / Leukemia',
-    'Oncology – Gastrointestinal Cancer': 'Oncology – Gastrointestinal Cancer',
-    'Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors': 'Oncology – Breast Cancer',
-    'Oncology – NSCLC': 'Oncology – NSCLC',
-    'Oncology – NSCLC, SCLC, TNBC': 'Oncology – NSCLC',
-    'Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases': 'Oncology – Lymphoma / Leukemia',
-    'Oncology – Ovarian Cancer / Solid Tumors': 'Oncology – Ovarian Cancer',
-    'Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)': 'Oncology – Solid Tumors',
-    'Oncology – ROS1-positive NSCLC': 'Oncology – NSCLC',
-    'Oncology – SCLC / Neuroendocrine Tumors': 'Oncology – Neuroendocrine Tumors',
-    'Oncology – Solid Tumors': 'Oncology – Solid Tumors',
-    'Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)': 'Oncology – Solid Tumors',
-    'Oncology – Solid Tumors (Urothelial Cancer, TNBC)': 'Oncology – Solid Tumors',
-    'Oncology – Solid Tumors (adult and pediatric)': 'Oncology – Solid Tumors',
-    'Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)': 'Oncology – Solid Tumors',
-    'Oncology – Solid Tumors/NSCLC': 'Oncology – NSCLC',
-    'Oncology – lung cancer, gastrointestinal cancer, ovarian cancer': 'Oncology – Solid Tumors',
-    'Oncology; Immunology – multiple indications': 'Oncology – Multiple Indications',
-    'Respiratory/Immunology – Asthma, Atopic Dermatitis': 'Respiratory – Asthma',
-    "Women's Health – Fertility / Assisted Reproductive Technology": "Women's Health",
+# ── Harmonization ─────────────────────────────────────────────────────────────
+
+TA_ENUM = [
+    "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
+    "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
+    "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
+    "Oncology – Multiple Indications",
+    "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
+    "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
+    "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
+    "Metabolic – Obesity", "Metabolic – Diabetes",
+    "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
+    "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
+    "Nephrology – IgA Nephropathy", "Nephrology – Other",
+    "Respiratory – Asthma", "Respiratory – Other",
+    "Women's Health", "RNA Therapeutics – Platform",
+    "Multiple Indications", "Not Disclosed",
+]
+TA_ENUM_SET = set(TA_ENUM)
+
+TERRITORY_ENUM = [
+    "Global", "Global ex-China", "Global ex-Greater China",
+    "Greater China", "China Mainland", "US & Europe", "Europe",
+    "Asia ex-China", "Latin America", "Multiple Regions", "Not Disclosed",
+]
+TERRITORY_ENUM_SET = set(TERRITORY_ENUM)
+
+# Exact-match lookup for known historical wording variants
+TA_EXACT = {
+    "Autoimmune":                                                                                     "Immunology – Multiple Indications",
+    "Autoimmune / Immunology":                                                                        "Immunology – Multiple Indications",
+    "Autoimmune / Oncology – B-NHL":                                                                  "Oncology – Lymphoma / Leukemia",
+    "Autoimmune / Oncology – Multiple Myeloma":                                                       "Oncology – Lymphoma / Leukemia",
+    "Autoimmune Diseases":                                                                            "Immunology – Multiple Indications",
+    "Cardiovascular – Cardiometabolic diseases":                                                      "Cardiovascular – Cardiometabolic",
+    "Immunology – Allergic Disorders (food allergy, asthma, CSU)":                                   "Immunology – Asthma / Allergic Disorders",
+    "Immunology – Atopic Dermatitis, Asthma":                                                        "Immunology – Atopic Dermatitis",
+    "Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps":              "Immunology – Atopic Dermatitis",
+    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)":             "Immunology – Psoriasis / Inflammatory",
+    "Immunology – Inflammatory Bowel Disease (IBD)":                                                 "Immunology – Inflammatory Bowel Disease",
+    "Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis":                             "Immunology – Lupus / Nephrology",
+    "Metabolic – Obesity / Cardiometabolic":                                                         "Metabolic – Obesity",
+    "Metabolic – Obesity/Type 2 Diabetes":                                                           "Metabolic – Obesity",
+    "Metabolic – Type 2 Diabetes / MASH":                                                            "Metabolic – Diabetes",
+    "Multiple – oral RNA therapeutics":                                                               "RNA Therapeutics – Platform",
+    "Not disclosed (likely Oncology based on BioNTech pipeline focus)":                              "Not Disclosed",
+    "Oncology":                                                                                       "Oncology – Multiple Indications",
+    "Oncology – Advanced Solid Tumors":                                                               "Oncology – Solid Tumors",
+    "Oncology – Breast Cancer (HR+/HER2-)":                                                          "Oncology – Breast Cancer",
+    "Oncology – Chronic Myeloid Leukemia (CML)":                                                     "Oncology – Lymphoma / Leukemia",
+    "Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors":                                    "Oncology – Breast Cancer",
+    "Oncology – NSCLC, SCLC, TNBC":                                                                  "Oncology – NSCLC",
+    "Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases":                                    "Oncology – Lymphoma / Leukemia",
+    "Oncology – Ovarian Cancer / Solid Tumors":                                                      "Oncology – Ovarian Cancer",
+    "Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)":                                        "Oncology – Solid Tumors",
+    "Oncology – ROS1-positive NSCLC":                                                                "Oncology – NSCLC",
+    "Oncology – SCLC / Neuroendocrine Tumors":                                                       "Oncology – Neuroendocrine Tumors",
+    "Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)":                "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (Urothelial Cancer, TNBC)":                                             "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (adult and pediatric)":                                                 "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)":                                "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors/NSCLC":                                                                 "Oncology – NSCLC",
+    "Oncology – lung cancer, gastrointestinal cancer, ovarian cancer":                               "Oncology – Solid Tumors",
+    "Oncology; Immunology – multiple indications":                                                   "Oncology – Multiple Indications",
+    "Respiratory/Immunology – Asthma, Atopic Dermatitis":                                            "Respiratory – Asthma",
+    "Women's Health – Fertility / Assisted Reproductive Technology":                                 "Women's Health",
 }
 
-TERRITORY_CANONICAL = {
-    'Global': 'Global',
-    'Global (Hansoh retains option to co-promote or solely commercialize in China)': 'Global',
-    'Global (exclusive rights to BioNTech)': 'Global',
-    'Worldwide': 'Global',
-    'Worldwide (Phase 1 asset) + ex-Greater China (Phase 1/2a asset)': 'Global ex-Greater China',
-    'Worldwide (taletrectinib previously out-licensed in China to Innovent, Japan to Nippon Kayaku, Korea)': 'Global',
-    'Global ex-China': 'Global ex-China',
-    'Global ex-China (all territories outside mainland China, Hong Kong, Macau, Taiwan, and Russia)': 'Global ex-China',
-    'Global ex-China (excluding Mainland China, Hong Kong, Macau and Taiwan)': 'Global ex-China',
-    'Global ex-China (excluding mainland China, Hong Kong, Macau and Taiwan)': 'Global ex-China',
-    'Global ex-China (excluding mainland China, Hong Kong, Macau, Taiwan)': 'Global ex-China',
-    'Global ex-China (excluding mainland China, Hong Kong, and Macau)': 'Global ex-China',
-    'Global ex-Greater China': 'Global ex-Greater China',
-    'Greater China': 'Greater China',
-    'Greater China and Singapore': 'Greater China',
-    'China Mainland': 'China Mainland',
-    'EU, UK, Switzerland and selected other countries': 'Europe',
-    'US, Canada, Europe, Japan (expanded in June 2024 to include Latin America, Middle East, Africa)': 'Multiple Regions',
-    'Brazil and LATAM': 'Latin America',
-    'Not disclosed': 'Not Disclosed',
-    'Not Disclosed': 'Not Disclosed',
+TERRITORY_EXACT = {
+    "Worldwide":                                                                                       "Global",
+    "Global (Hansoh retains option to co-promote or solely commercialize in China)":                  "Global",
+    "Global (exclusive rights to BioNTech)":                                                          "Global",
+    "Worldwide (Phase 1 asset) + ex-Greater China (Phase 1/2a asset)":                               "Global ex-Greater China",
+    "Worldwide (taletrectinib previously out-licensed in China to Innovent, Japan to Nippon Kayaku, Korea)": "Global",
+    "Global ex-China (all territories outside mainland China, Hong Kong, Macau, Taiwan, and Russia)": "Global ex-China",
+    "Global ex-China (excluding Mainland China, Hong Kong, Macau and Taiwan)":                        "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, Macau and Taiwan)":                        "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, Macau, Taiwan)":                           "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, and Macau)":                               "Global ex-China",
+    "Greater China and Singapore":                                                                     "Greater China",
+    "EU, UK, Switzerland and selected other countries":                                               "Europe",
+    "US, Canada, Europe, Japan (expanded in June 2024 to include Latin America, Middle East, Africa)": "Multiple Regions",
+    "Brazil and LATAM":                                                                               "Latin America",
+    "Not disclosed":                                                                                   "Not Disclosed",
 }
+
+# Keyword rules for fuzzy TA fallback — evaluated in order, first match wins.
+# Each entry: ([keywords], canonical_value)
+# More specific terms come before general ones to avoid false grabs.
+_TA_FUZZY_RULES = [
+    # ── Oncology subtypes ──────────────────────────────────────────────────────
+    (["nsclc", "non-small cell lung"],                        "Oncology – NSCLC"),
+    (["lung cancer"],                                         "Oncology – NSCLC"),
+    (["sclc", "small cell lung"],                             "Oncology – Neuroendocrine Tumors"),
+    (["neuroendocrine", "net ", "carcinoid"],                 "Oncology – Neuroendocrine Tumors"),
+    (["breast cancer", "her2", "hr+", "tnbc"],                "Oncology – Breast Cancer"),
+    (["ovarian", "fallopian", "peritoneal"],                  "Oncology – Ovarian Cancer"),
+    (["gastric", "colorectal", "crc", "pdac", "pancreatic",
+      "biliary", "cholangiocarcinoma", "hepatocellular",
+      "gastrointestinal", "gi cancer"],                       "Oncology – Gastrointestinal Cancer"),
+    (["lymphoma", "leukemia", "leukaemia", "myeloma",
+      "cll", "mcl", "aml", "cml", "all", "nhl", "dlbcl"],    "Oncology – Lymphoma / Leukemia"),
+    (["glioblastoma", "glioma", "gbm", "brain tumor",
+      "brain tumour", "cns cancer"],                          "Oncology – Solid Tumors"),
+    (["urothelial", "bladder cancer", "prostate",
+      "renal cell", "rcc", "cervical",
+      "endometrial", "head and neck", "sarcoma",
+      "mesothelioma", "thyroid cancer",
+      "solid tumor", "solid tumour", "advanced tumor"],       "Oncology – Solid Tumors"),
+    (["oncology", "cancer", "tumor", "tumour",
+      "carcinoma", "malignancy"],                             "Oncology – Multiple Indications"),
+    # ── Immunology subtypes ───────────────────────────────────────────────────
+    (["atopic dermatitis", "eczema", "ad "],                  "Immunology – Atopic Dermatitis"),
+    (["ibd", "inflammatory bowel", "crohn",
+      "ulcerative colitis"],                                  "Immunology – Inflammatory Bowel Disease"),
+    (["lupus", "sle", "lupus nephritis",
+      "systemic lupus"],                                      "Immunology – Lupus / Nephrology"),
+    (["asthma", "allergic", "food allergy", "csu",
+      "chronic urticaria", "rhinosinusitis"],                 "Immunology – Asthma / Allergic Disorders"),
+    (["psoriasis", "psoriatic", "ankylosing",
+      "rheumatoid arthritis", "ra "],                         "Immunology – Psoriasis / Inflammatory"),
+    (["autoimmune", "immunology", "inflammatory"],            "Immunology – Multiple Indications"),
+    # ── Metabolic ─────────────────────────────────────────────────────────────
+    (["obesity", "weight loss", "glp-1", "glp1",
+      "anti-obesity"],                                        "Metabolic – Obesity"),
+    (["mash", "nash", "steatohepatitis",
+      "fatty liver", "masld"],                                "Metabolic – MASH / Liver"),
+    (["type 2 diabetes", "t2d", "type 2 dm",
+      "hba1c", "insulin"],                                    "Metabolic – Diabetes"),
+    (["cardiometabolic", "metabolic syndrome"],               "Metabolic – Cardiometabolic"),
+    # ── Cardiovascular ────────────────────────────────────────────────────────
+    (["dyslipidemia", "cholesterol", "ldl", "lp(a)",
+      "triglyceride", "hyperlipidemia"],                      "Cardiovascular – Dyslipidemia"),
+    (["cardiovascular", "cardiac", "heart failure",
+      "hypertension", "hcm", "atrial fibrillation"],          "Cardiovascular – Cardiometabolic"),
+    # ── Nephrology ────────────────────────────────────────────────────────────
+    (["iga nephropathy", "igan", "berger"],                   "Nephrology – IgA Nephropathy"),
+    (["nephrology", "kidney", "renal", "glomerular",
+      "ckd", "fsgs"],                                         "Nephrology – Other"),
+    # ── Respiratory ───────────────────────────────────────────────────────────
+    (["respiratory", "copd", "pulmonary fibrosis",
+      "ipf", "pulmonary hypertension"],                       "Respiratory – Other"),
+    # ── Special ───────────────────────────────────────────────────────────────
+    (["women", "fertility", "reproductive",
+      "endometriosis", "assisted reproductive"],              "Women's Health"),
+    (["rna", "sirna", "mrna", "oligonucleotide",
+      "antisense", "aso "],                                   "RNA Therapeutics – Platform"),
+]
+
+def _ta_fuzzy(s: str) -> str | None:
+    """Return first keyword-matched canonical TA, or None."""
+    sl = s.lower()
+    for keywords, canonical in _TA_FUZZY_RULES:
+        if any(kw in sl for kw in keywords):
+            return canonical
+    return None
+
+def normalize_therapeutic_area(s: str) -> str:
+    """
+    Three-tier normalization:
+      1. Already canonical  → pass through unchanged
+      2. Known exact variant → map via TA_EXACT
+      3. New wording         → fuzzy keyword match
+      4. No match            → keep raw + print warning for future triage
+    """
+    if not s:
+        return "Not Disclosed"
+    if s in TA_ENUM_SET:
+        return s
+    if s in TA_EXACT:
+        return TA_EXACT[s]
+    fuzzy = _ta_fuzzy(s)
+    if fuzzy:
+        print(f"  [TA fuzzy] {repr(s)} → {repr(fuzzy)}")
+        return fuzzy
+    print(f"  [TA UNMATCHED] {repr(s)} — stored as-is; add to TA_EXACT to silence")
+    return s
+
+def normalize_territory(s: str) -> str:
+    """
+    Three-tier normalization:
+      1. Already canonical  → pass through unchanged
+      2. Known exact variant → map via TERRITORY_EXACT
+      3. Fuzzy keyword match for common patterns
+      4. No match            → keep raw + print warning
+    """
+    if not s:
+        return "Not Disclosed"
+    if s in TERRITORY_ENUM_SET:
+        return s
+    if s in TERRITORY_EXACT:
+        return TERRITORY_EXACT[s]
+    sl = s.lower()
+    if "ex-greater china" in sl or "ex greater china" in sl or (
+            "excluding" in sl and "greater china" in sl):
+        return "Global ex-Greater China"
+    if ("ex-china" in sl or "ex china" in sl
+            or ("excluding" in sl and "china" in sl)):
+        return "Global ex-China"
+    if "greater china" in sl:
+        return "Greater China"
+    if "worldwide" in sl:
+        return "Global"
+    if "mainland china" in sl or "china mainland" in sl:
+        return "China Mainland"
+    if "us" in sl and "europe" in sl:
+        return "US & Europe"
+    if "latam" in sl or "latin america" in sl:
+        return "Latin America"
+    if "eu" in sl or "europe" in sl or "uk" in sl:
+        return "Europe"
+    if "not disclosed" in sl or "undisclosed" in sl:
+        return "Not Disclosed"
+    print(f"  [TERRITORY UNMATCHED] {repr(s)} — stored as-is; add to TERRITORY_EXACT to silence")
+    return s
 
 def normalize_usd(s: str) -> str:
     """Extract first clean dollar figure; return 'Not Disclosed' if none."""
     if not s:
-        return 'Not Disclosed'
+        return "Not Disclosed"
     s = s.strip()
-    if re.match(r'(not disclosed|all-stock|double.digit million|~\$250M.*all-stock)', s, re.I):
-        return 'Not Disclosed'
-    s = re.sub(r'^~', '', s)
-    m = re.search(r'\$\s*([\d,]+(?:\.\d+)?)\s*B', s, re.I)
+    if re.match(r"(not disclosed|all-stock|double.digit million|~\$250M.*all-stock)", s, re.I):
+        return "Not Disclosed"
+    s = re.sub(r"^~", "", s)
+    m = re.search(r"\$\s*([\d,]+(?:\.\d+)?)\s*B", s, re.I)
     if m:
-        n = round(float(m.group(1).replace(',', '')) * 1000, 1)
-        return f'${n/1000:.3g}B'
-    m = re.search(r'\$\s*([\d,]+(?:\.\d+)?)\s*M', s, re.I)
+        n = round(float(m.group(1).replace(",", "")) * 1000, 1)
+        return f"${n / 1000:.3g}B"
+    m = re.search(r"\$\s*([\d,]+(?:\.\d+)?)\s*M", s, re.I)
     if m:
-        n = round(float(m.group(1).replace(',', '')), 1)
-        return f'${n:.3g}M'
-    return 'Not Disclosed'
-
-def normalize_therapeutic_area(s: str) -> str:
-    """Map raw value to canonical enum; pass through if already canonical."""
-    return TA_CANONICAL.get(s, s) if s else 'Not Disclosed'
-
-def normalize_territory(s: str) -> str:
-    """Map raw value to canonical enum; pass through if already canonical."""
-    return TERRITORY_CANONICAL.get(s, s) if s else 'Not Disclosed'
+        n = round(float(m.group(1).replace(",", "")), 1)
+        return f"${n:.3g}M"
+    return "Not Disclosed"
 
 
 def save_deal(deal_data: dict) -> str:
@@ -840,7 +974,7 @@ Calling finish() early wastes the budget and leaves deals unfound.
 - asset: drug code + target + indication e.g. "HRS-5346 (oral Lp(a) inhibitor, cardiovascular)"
 - drug_name: code only — "HRS-5346" or "ivonescimab". No descriptions.
 - modality: Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC / Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide / Oligonucleotide / Other
-- therapeutic_area: pick the CLOSEST value from this fixed list —
+- therapeutic_area: pick the CLOSEST value from the fixed enum —
     Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
     Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
     Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
@@ -851,11 +985,11 @@ Calling finish() early wastes the budget and leaves deals unfound.
     Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
     Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
     Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
-  Use "Oncology – Solid Tumors" for broad solid-tumor assets. Use "Oncology – Multiple Indications" only when the deal explicitly spans several distinct tumor types.
+  Use "Oncology – Solid Tumors" for broad solid-tumor assets without a more specific match.
 - stage: Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
-- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed". Strip all qualifiers — no parenthetical notes, no "+" suffix.
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers, parenthetical notes, and "+" suffixes.
 - territory: Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
-  Use "Global ex-China" for rights excluding mainland China/HK/Macau/Taiwan. Use "Global" when "Worldwide" is stated with no exclusions.
+  "Worldwide" → Global. "Global ex-China (excluding ...)" → Global ex-China.
 - equity_component: e.g. "~20% stake in NewCo" or "None"
 - highlights: ONE sentence max — most notable fact (value, strategic angle, or record term)
 - source_url / source_name: article URL and publication name
@@ -867,21 +1001,17 @@ opinion pieces, or any item missing a named Chinese company + named drug/asset.
  SEARCH STRATEGY — MANDATORY SEQUENCE
 ═══════════════════════════════════════════════════
 
-TOOL USAGE RULE:
-  • search_web_wide  → your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7)
-                       No domain restrictions — catches deals on press wires, IR pages,
-                       regional sites, and anywhere not covered by top-tier press.
-  • search_web       → ONLY used in ROUND 2 (priority source deep-dives)
-                       Scoped to FierceBiotech / Endpoints / BioPharma Dive / Reuters etc.
-                       Use AFTER wide discovery to get richer detail on already-found deals
-                       AND to catch any megadeals that only appeared in premium outlets.
-  • search_web_cn    → ONLY used in ROUND 6 for Mandarin-language sources.
+TOOL USAGE RULE — read this before every search:
+  search_web_wide  → PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7).
+                     No domain restrictions — finds deals on press wires, IR pages,
+                     regional sites, and anywhere priority sources don't cover.
+  search_web       → ONLY used in ROUND 8 (priority deep-dive cleanup).
+                     Scoped to FierceBiotech / Endpoints / BioPharma Dive / Reuters etc.
+  search_web_cn    → ONLY used in ROUND 6 for Mandarin-language sources.
 
-You MUST work through ALL of the following query categories in order.
-Do NOT repeat a query type you've already used. Keep a mental checklist.
+You MUST work through ALL rounds in order. Do NOT repeat a query type.
 
 ROUND 1 — MONTHLY SWEEPS via search_web_wide (12 searches)
-Wide search for each month — catches the broadest possible set of deals:
   "China biopharma licensing deal January 2024"
   "China biopharma licensing deal February 2024"
   ... (March through December)
@@ -897,7 +1027,7 @@ ROUND 3 — MODALITY / THERAPY SWEEPS via search_web_wide
   "China CAR-T cell therapy licensing 2024"
   "China siRNA oligonucleotide deal 2024"
 
-ROUND 4 — PARTNER-FOCUSED via search_web_wide (search by the Western buyer)
+ROUND 4 — PARTNER-FOCUSED via search_web_wide
   "AstraZeneca China licensing deal 2024"
   "Pfizer China biotech deal 2024"
   "Bristol Myers Squibb China deal 2024"
@@ -907,54 +1037,40 @@ ROUND 4 — PARTNER-FOCUSED via search_web_wide (search by the Western buyer)
 ROUND 5 — STRUCTURE SEARCHES via search_web_wide
   "China biotech NewCo spinout 2024"
   "China biopharma option agreement deal 2024"
-  "China licensing deal under $200M 2024"    ← catches smaller deals missed by megadeal coverage
+  "China licensing deal under $200M 2024"
 
-ROUND 6 — CHINESE-LANGUAGE SEARCHES (use search_web_cn for these)
-Search in Mandarin to find deals that never got English press coverage.
-These catch the ~50% of deals that only appear in Chinese sources:
-  "中国生物科技 对外授权 2024"               (China biotech outbound licensing 2024)
-  "医药 license-out 交易 2024"              (pharma license-out deals 2024)
-  "普方生物 Genmab 授权"                    (ProFoundBio Genmab deal)
-  "启愈生物 J&J 授权"                       (Proteologix J&J deal)
-  "奇璞生物 授权交易 2024"                  (smaller company deals 2024)
-  "中国创新药 BD交易 2024 临床前"            (China innovative drug BD deals 2024 preclinical)
-  "生物技术公司 跨境授权 2024"               (biotech cross-border licensing 2024)
-  "新药 license out 里程碑 2024"            (new drug license-out milestones 2024)
+ROUND 6 — CHINESE-LANGUAGE SEARCHES via search_web_cn
+  "中国生物科技 对外授权 2024"
+  "医药 license-out 交易 2024"
+  "普方生物 Genmab 授权"
+  "启愈生物 J&J 授权"
+  "奇璞生物 授权交易 2024"
+  "中国创新药 BD交易 2024 临床前"
+  "生物技术公司 跨境授权 2024"
+  "新药 license out 里程碑 2024"
 
-ROUND 7 — CHINA-HQ COMPANIES WITH ENGLISH-SOUNDING NAMES via search_web_wide
-Many active China deal-makers have names that don't signal their Chinese origin.
-Use two complementary approaches:
-
-  City-cluster searches (catches unknown companies in active hubs):
-    "Shanghai biotech licensing deal 2024"
-    "Suzhou biotech licensing deal 2024"
-    "Nanjing biotech deal 2024"
-    "Beijing biopharmaceutical licensing 2024"
-    "Hangzhou biotech deal 2024"
-    "Chengdu Zhuhai biotech licensing 2024"
-
-  China-based VC portfolio searches (these VCs back most China-HQ English-named biotechs):
+ROUND 7 — CHINA-HQ ENGLISH-NAMED COMPANIES via search_web_wide
+  City-cluster searches:
+    "Shanghai biotech licensing deal 2024", "Suzhou biotech licensing deal 2024"
+    "Nanjing biotech deal 2024", "Beijing biopharmaceutical licensing 2024"
+    "Hangzhou biotech deal 2024", "Chengdu Zhuhai biotech licensing 2024"
+  VC portfolio searches:
     "OrbiMed China portfolio biotech deal 2024"
     "6 Dimensions Capital portfolio licensing 2024"
     "Lilly Asia Ventures portfolio company deal 2024"
     "Hillhouse Capital biotech licensing deal 2024"
-
-  Known China-HQ English-named companies not yet in DB — search directly:
+  Direct company searches:
     "Allorion Therapeutics deal 2024", "AnHearts licensing 2024",
     "Biotheus deal 2024", "BridGene Biosciences deal 2024",
     "Chimagen GSK deal 2024", "Eccogene licensing 2024",
-    "Epimab BioTherapeutics deal 2024", "FutureGen deal 2024",
-    "InSilico Medicine licensing 2024", "Jemincare deal 2024",
+    "Epimab BioTherapeutics deal 2024", "InSilico Medicine licensing 2024",
     "Proteologix licensing 2024", "ProFoundBio Genmab 2024",
-    "Regor Therapeutics deal 2024", "SanReno Therapeutics deal 2024",
-    "Triastek BioNTech deal 2024", "VelaVigo deal 2024"
+    "Regor Therapeutics deal 2024", "Triastek BioNTech deal 2024"
+  Set chinese_hq = "Yes" for all companies found in this round.
 
-  NOTE on tagging: When saving deals from these companies, set
-  chinese_hq = "Yes" so they are correctly classified despite their English names.
-
-ROUND 8 — PRIORITY SOURCE DEEP-DIVES via search_web (scoped to top publications)
-Run the highest-yield queries again through priority sources to catch any deals
-that only appeared in premium outlets and were missed by the wide pass:
+ROUND 8 — PRIORITY SOURCE DEEP-DIVE via search_web (cleanup pass)
+Run after all wide discovery is complete. Catches deals that only appeared in
+premium outlets and were missed by the wide search:
   "China biopharma licensing deal 2024 site:fiercebiotech.com"
   "China licensing deal 2024 site:endpointsnews.com"
   "China biotech deal 2024 site:biopharmadive.com"
@@ -965,7 +1081,7 @@ that only appeared in premium outlets and were missed by the wide pass:
  SEARCH BUDGET REMINDER
 ═══════════════════════════════════════════════════
 
-Your budget is measured in SEARCHES (any search tool call), not total API calls.
+Budget counts any search tool call (search_web_wide, search_web_cn, or search_web).
 Save calls are free — do as many save_deal() calls as you need after each search.
 
 - Searches 1-12:   Monthly sweeps — search_web_wide (ROUND 1)
@@ -975,11 +1091,11 @@ Save calls are free — do as many save_deal() calls as you need after each sear
 - Searches 44-46:  Structure searches — search_web_wide (ROUND 5)
 - Searches 47-54:  Chinese-language — search_web_cn (ROUND 6)
 - Searches 55-70:  China-HQ English-named — search_web_wide (ROUND 7)
-- Searches 71-75:  Priority source deep-dives — search_web (ROUND 8)
+- Searches 71-75:  Priority deep-dive — search_web (ROUND 8)
 - Final:           finish() — only after ALL rounds complete
 
-After EACH search call, immediately call save_deal() for EVERY deal
-in the results before doing the next search. Save calls are free.
+After EACH search call, immediately call save_deal() for EVERY deal in the results
+before doing the next search. Save calls are free.
 
 DO NOT call finish() before completing at least ROUND 1, ROUND 2, and ROUND 7."""
 
@@ -1914,7 +2030,7 @@ and save it using save_deal().
 - modality:         Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC /
                     Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide /
                     Oligonucleotide / Other
-- therapeutic_area: pick the CLOSEST value from this fixed list —
+- therapeutic_area: pick the CLOSEST value from the fixed enum —
     Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
     Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
     Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
@@ -1925,11 +2041,11 @@ and save it using save_deal().
     Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
     Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
     Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
-  Use "Oncology – Solid Tumors" for broad solid-tumor assets. Use "Oncology – Multiple Indications" only when the deal explicitly spans several distinct tumor types.
+  Use "Oncology – Solid Tumors" for broad solid-tumor assets without a more specific match.
 - stage:            Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
-- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed". Strip all qualifiers — no parenthetical notes, no "+" suffix.
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers, parenthetical notes, and "+" suffixes.
 - territory:        Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
-  Use "Global ex-China" for rights excluding mainland China/HK/Macau/Taiwan. Use "Global" when "Worldwide" is stated with no exclusions.
+  "Worldwide" → Global. "Global ex-China (excluding ...)" → Global ex-China.
 - chinese_hq:       "Yes" / "No" / "Unknown" — set "Yes" even for English-sounding
                     China-founded companies (ProFoundBio, Regor, AnHearts, LaNova, etc.)
 - highlights:       ONE sentence — most notable fact about this deal
