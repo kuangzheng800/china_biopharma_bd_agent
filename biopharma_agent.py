@@ -72,7 +72,68 @@ CHINESE_SOURCES = [
     "sse.com.cn",             # Shanghai Stock Exchange disclosures
 ]
 
-# ── Persistent Database ────────────────────────────────────────────────────────
+# ── Canonical field enums — single source of truth ────────────────────────────
+# These are referenced by: TOOLS schema, prompt field guides, and runtime
+# normalizers. Edit here only — never hardcode values elsewhere.
+
+DEAL_TYPE_ENUM = [
+    "licensing-out", "licensing-in", "option-to-license",
+    "newco-spinout", "platform-deal", "co-development",
+    "partnership", "M&A", "acquisition",
+]
+
+MODALITY_ENUM = [
+    "Small Molecule", "Monoclonal Antibody", "Bispecific Antibody", "ADC",
+    "Cell Therapy", "Gene Therapy", "siRNA", "mRNA",
+    "Fusion Protein", "Peptide", "Oligonucleotide", "Other",
+]
+
+STAGE_ENUM = [
+    "Preclinical", "Phase 1", "Phase 2", "Phase 3", "Approved", "Platform",
+]
+
+TA_ENUM = [
+    "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
+    "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
+    "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
+    "Oncology – Multiple Indications",
+    "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
+    "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
+    "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
+    "Metabolic – Obesity", "Metabolic – Diabetes",
+    "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
+    "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
+    "Nephrology – IgA Nephropathy", "Nephrology – Other",
+    "Respiratory – Asthma", "Respiratory – Other",
+    "Women's Health", "RNA Therapeutics – Platform",
+    "Multiple Indications", "Not Disclosed",
+]
+
+TERRITORY_ENUM = [
+    "Global", "Global ex-China", "Global ex-Greater China",
+    "Greater China", "China Mainland", "US & Europe", "Europe",
+    "Asia ex-China", "Latin America", "Multiple Regions", "Not Disclosed",
+]
+
+CHINESE_HQ_ENUM = ["Yes", "No", "Unknown"]
+
+def _pipe(enum: list) -> str:
+    """Format an enum list as a pipe-separated string for prompt field guides."""
+    return " | ".join(enum)
+
+def _pipe_wrap(enum: list, width: int = 100) -> str:
+    """Pipe-separated string, wrapped at `width` chars, indented for readability."""
+    lines, cur = [], ""
+    for v in enum:
+        add = ("" if not cur else " | ") + v
+        if cur and len(cur) + len(add) > width:
+            lines.append(cur)
+            cur = v
+        else:
+            cur += add
+    if cur:
+        lines.append(cur)
+    return "\n    ".join(lines)
 
 def load_database() -> dict:
     if DB_PATH.exists():
@@ -236,7 +297,7 @@ def is_duplicate(deal: dict, existing_deals: list) -> bool:
 TOOLS = [
     {
         "name": "search_web",
-        "description": "Search English-language web scoped to PRIORITY SOURCES only (FierceBiotech, Endpoints News, BioPharma Dive, Reuters, Bloomberg, STAT News). Use ONLY in ROUND 8 — after search_web_wide has already done broad discovery — to catch any deals that only appeared in premium outlets.",
+        "description": "Search English-language web scoped to PRIORITY SOURCES only (FierceBiotech, Endpoints News, BioPharma Dive, Reuters, Bloomberg, STAT News). Use ONLY in ROUND 8 — after search_web_wide has completed all discovery rounds.",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -245,7 +306,7 @@ TOOLS = [
     },
     {
         "name": "search_web_wide",
-        "description": "Open web search with NO domain restrictions — searches the entire web including press releases, company IR pages, biotech blogs, regional news, and wire services. Use as your PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7). Casts the widest net and catches deals that never appear in priority sources.",
+        "description": "Open web search with NO domain restrictions — entire web including press releases, IR pages, biotech blogs, regional news, wire services. PRIMARY tool for ALL discovery rounds (1–7).",
         "input_schema": {
             "type": "object",
             "properties": {"query": {"type": "string"}},
@@ -254,10 +315,10 @@ TOOLS = [
     },
     {
         "name": "search_web_cn",
-        "description": "Search Chinese-language sources (医药魔方, 药渡, 生物谷, stock exchange filings). Use Mandarin queries for best results. Use for deals involving less well-known Chinese companies not covered by English press.",
+        "description": "Search Chinese-language sources (医药魔方, 药渡, 生物谷, stock exchange filings). Use general Mandarin pattern queries — no specific company or partner names. Use ONLY in ROUND 6.",
         "input_schema": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "Preferably in Mandarin, e.g. '普方生物 对外授权 2024'"}},
+            "properties": {"query": {"type": "string", "description": "General Mandarin pattern, e.g. '中国生物技术 对外授权 2024'"}},
             "required": ["query"]
         }
     },
@@ -270,51 +331,34 @@ TOOLS = [
                 "announcement_month_year": {"type": "string"},
                 "deal_type": {
                     "type": "string",
-                    "enum": [
-                        "licensing-out", "licensing-in", "option-to-license",
-                        "newco-spinout", "platform-deal", "co-development",
-                        "partnership", "M&A", "acquisition"
-                    ]
+                    "enum": DEAL_TYPE_ENUM
                 },
                 "chinese_party":    {"type": "string"},
                 "foreign_party":    {"type": "string"},
                 "asset":            {"type": "string"},
                 "drug_name":        {"type": "string"},
-                "modality":         {"type": "string"},
+                "modality": {
+                    "type": "string",
+                    "enum": MODALITY_ENUM
+                },
                 "therapeutic_area": {
                     "type": "string",
-                    "enum": [
-                        "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
-                        "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
-                        "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
-                        "Oncology – Multiple Indications",
-                        "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
-                        "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
-                        "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
-                        "Metabolic – Obesity", "Metabolic – Diabetes",
-                        "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
-                        "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
-                        "Nephrology – IgA Nephropathy", "Nephrology – Other",
-                        "Respiratory – Asthma", "Respiratory – Other",
-                        "Women's Health", "RNA Therapeutics – Platform",
-                        "Multiple Indications", "Not Disclosed"
-                    ]
+                    "enum": TA_ENUM
                 },
-                "stage":            {"type": "string"},
+                "stage": {
+                    "type": "string",
+                    "enum": STAGE_ENUM
+                },
                 "total_value_usd":  {"type": "string"},
                 "upfront_usd":      {"type": "string"},
                 "territory": {
                     "type": "string",
-                    "enum": [
-                        "Global", "Global ex-China", "Global ex-Greater China",
-                        "Greater China", "China Mainland", "US & Europe", "Europe",
-                        "Asia ex-China", "Latin America", "Multiple Regions", "Not Disclosed"
-                    ]
+                    "enum": TERRITORY_ENUM
                 },
                 "equity_component": {"type": "string"},
                 "chinese_hq": {
                     "type": "string",
-                    "enum": ["Yes", "No", "Unknown"],
+                    "enum": CHINESE_HQ_ENUM,
                     "description": "Is the chinese_party headquartered in mainland China/HK/Macau? Set 'Yes' even if the company has an English-sounding name (e.g. ProFoundBio, Regor, AnHearts, Eccogene, I-Mab, Biotheus, Triastek)."
                 },
                 "highlights":       {"type": "string"},
@@ -472,17 +516,13 @@ def search_web_cn(query: str) -> str:
 
 
 def search_web_wide(query: str) -> str:
-    """Open web search with no domain restrictions — primary discovery tool."""
+    """Open web search — no domain restrictions. Primary discovery tool for Rounds 1–7."""
     if TAVILY_API_KEY:
         try:
             resp = requests.post(
                 "https://api.tavily.com/search",
-                json={
-                    "api_key": TAVILY_API_KEY,
-                    "query": query,
-                    "search_depth": "advanced",
-                    "max_results": 8,
-                },
+                json={"api_key": TAVILY_API_KEY, "query": query,
+                      "search_depth": "advanced", "max_results": 8},
                 timeout=15
             )
             results = resp.json().get("results", [])
@@ -493,11 +533,7 @@ def search_web_wide(query: str) -> str:
                 domain   = r.get("url", "").split("/")[2] if "/" in r.get("url", "") else ""
                 priority = "★ PRIORITY SOURCE" if any(p in domain for p in PRIORITY_SOURCES) else ""
                 body     = r.get("content", "") or r.get("raw_content", "") or ""
-                out.append(
-                    f"{priority}\nTITLE: {r.get('title', '')}\n"
-                    f"URL: {r.get('url', '')}\n"
-                    f"CONTENT: {body[:2000]}\n"
-                )
+                out.append(f"{priority}\nTITLE: {r.get('title','')}\nURL: {r.get('url','')}\nCONTENT: {body[:2000]}\n")
             return "\n---\n".join(out)
         except Exception as e:
             return f"Search error: {e}"
@@ -561,100 +597,75 @@ def validate_deal(deal_data: dict) -> tuple[bool, str]:
 
 
 # ── Harmonization ─────────────────────────────────────────────────────────────
+# TA_ENUM and TERRITORY_ENUM are defined at module top as canonical sources.
+# Only the fast-lookup sets are derived here.
 
-TA_ENUM = [
-    "Oncology – Solid Tumors", "Oncology – NSCLC", "Oncology – Breast Cancer",
-    "Oncology – Gastrointestinal Cancer", "Oncology – Lymphoma / Leukemia",
-    "Oncology – Ovarian Cancer", "Oncology – Neuroendocrine Tumors",
-    "Oncology – Multiple Indications",
-    "Immunology – Atopic Dermatitis", "Immunology – Inflammatory Bowel Disease",
-    "Immunology – Lupus / Nephrology", "Immunology – Asthma / Allergic Disorders",
-    "Immunology – Psoriasis / Inflammatory", "Immunology – Multiple Indications",
-    "Metabolic – Obesity", "Metabolic – Diabetes",
-    "Metabolic – Cardiometabolic", "Metabolic – MASH / Liver",
-    "Cardiovascular – Dyslipidemia", "Cardiovascular – Cardiometabolic",
-    "Nephrology – IgA Nephropathy", "Nephrology – Other",
-    "Respiratory – Asthma", "Respiratory – Other",
-    "Women's Health", "RNA Therapeutics – Platform",
-    "Multiple Indications", "Not Disclosed",
-]
-TA_ENUM_SET = set(TA_ENUM)
-
-TERRITORY_ENUM = [
-    "Global", "Global ex-China", "Global ex-Greater China",
-    "Greater China", "China Mainland", "US & Europe", "Europe",
-    "Asia ex-China", "Latin America", "Multiple Regions", "Not Disclosed",
-]
+TA_ENUM_SET        = set(TA_ENUM)
 TERRITORY_ENUM_SET = set(TERRITORY_ENUM)
 
-# Exact-match lookup for known historical wording variants
 TA_EXACT = {
-    "Autoimmune":                                                                                     "Immunology – Multiple Indications",
-    "Autoimmune / Immunology":                                                                        "Immunology – Multiple Indications",
-    "Autoimmune / Oncology – B-NHL":                                                                  "Oncology – Lymphoma / Leukemia",
-    "Autoimmune / Oncology – Multiple Myeloma":                                                       "Oncology – Lymphoma / Leukemia",
-    "Autoimmune Diseases":                                                                            "Immunology – Multiple Indications",
-    "Cardiovascular – Cardiometabolic diseases":                                                      "Cardiovascular – Cardiometabolic",
-    "Immunology – Allergic Disorders (food allergy, asthma, CSU)":                                   "Immunology – Asthma / Allergic Disorders",
-    "Immunology – Atopic Dermatitis, Asthma":                                                        "Immunology – Atopic Dermatitis",
-    "Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps":              "Immunology – Atopic Dermatitis",
-    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)":             "Immunology – Psoriasis / Inflammatory",
-    "Immunology – Inflammatory Bowel Disease (IBD)":                                                 "Immunology – Inflammatory Bowel Disease",
-    "Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis":                             "Immunology – Lupus / Nephrology",
-    "Metabolic – Obesity / Cardiometabolic":                                                         "Metabolic – Obesity",
-    "Metabolic – Obesity/Type 2 Diabetes":                                                           "Metabolic – Obesity",
-    "Metabolic – Type 2 Diabetes / MASH":                                                            "Metabolic – Diabetes",
-    "Multiple – oral RNA therapeutics":                                                               "RNA Therapeutics – Platform",
-    "Not disclosed (likely Oncology based on BioNTech pipeline focus)":                              "Not Disclosed",
-    "Oncology":                                                                                       "Oncology – Multiple Indications",
-    "Oncology – Advanced Solid Tumors":                                                               "Oncology – Solid Tumors",
-    "Oncology – Breast Cancer (HR+/HER2-)":                                                          "Oncology – Breast Cancer",
-    "Oncology – Chronic Myeloid Leukemia (CML)":                                                     "Oncology – Lymphoma / Leukemia",
-    "Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors":                                    "Oncology – Breast Cancer",
-    "Oncology – NSCLC, SCLC, TNBC":                                                                  "Oncology – NSCLC",
-    "Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases":                                    "Oncology – Lymphoma / Leukemia",
-    "Oncology – Ovarian Cancer / Solid Tumors":                                                      "Oncology – Ovarian Cancer",
-    "Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)":                                        "Oncology – Solid Tumors",
-    "Oncology – ROS1-positive NSCLC":                                                                "Oncology – NSCLC",
-    "Oncology – SCLC / Neuroendocrine Tumors":                                                       "Oncology – Neuroendocrine Tumors",
-    "Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)":                "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (Urothelial Cancer, TNBC)":                                             "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (adult and pediatric)":                                                 "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)":                                "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors/NSCLC":                                                                 "Oncology – NSCLC",
-    "Oncology – lung cancer, gastrointestinal cancer, ovarian cancer":                               "Oncology – Solid Tumors",
-    "Oncology; Immunology – multiple indications":                                                   "Oncology – Multiple Indications",
-    "Respiratory/Immunology – Asthma, Atopic Dermatitis":                                            "Respiratory – Asthma",
-    "Women's Health – Fertility / Assisted Reproductive Technology":                                 "Women's Health",
+    "Autoimmune": "Immunology – Multiple Indications",
+    "Autoimmune / Immunology": "Immunology – Multiple Indications",
+    "Autoimmune / Oncology – B-NHL": "Oncology – Lymphoma / Leukemia",
+    "Autoimmune / Oncology – Multiple Myeloma": "Oncology – Lymphoma / Leukemia",
+    "Autoimmune Diseases": "Immunology – Multiple Indications",
+    "Cardiovascular – Cardiometabolic diseases": "Cardiovascular – Cardiometabolic",
+    "Immunology – Allergic Disorders (food allergy, asthma, CSU)": "Immunology – Asthma / Allergic Disorders",
+    "Immunology – Atopic Dermatitis, Asthma": "Immunology – Atopic Dermatitis",
+    "Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps": "Immunology – Atopic Dermatitis",
+    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)": "Immunology – Psoriasis / Inflammatory",
+    "Immunology – Inflammatory Bowel Disease (IBD)": "Immunology – Inflammatory Bowel Disease",
+    "Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis": "Immunology – Lupus / Nephrology",
+    "Metabolic – Obesity / Cardiometabolic": "Metabolic – Obesity",
+    "Metabolic – Obesity/Type 2 Diabetes": "Metabolic – Obesity",
+    "Metabolic – Type 2 Diabetes / MASH": "Metabolic – Diabetes",
+    "Multiple – oral RNA therapeutics": "RNA Therapeutics – Platform",
+    "Not disclosed (likely Oncology based on BioNTech pipeline focus)": "Not Disclosed",
+    "Oncology": "Oncology – Multiple Indications",
+    "Oncology – Advanced Solid Tumors": "Oncology – Solid Tumors",
+    "Oncology – Breast Cancer (HR+/HER2-)": "Oncology – Breast Cancer",
+    "Oncology – Chronic Myeloid Leukemia (CML)": "Oncology – Lymphoma / Leukemia",
+    "Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors": "Oncology – Breast Cancer",
+    "Oncology – NSCLC, SCLC, TNBC": "Oncology – NSCLC",
+    "Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases": "Oncology – Lymphoma / Leukemia",
+    "Oncology – Ovarian Cancer / Solid Tumors": "Oncology – Ovarian Cancer",
+    "Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)": "Oncology – Solid Tumors",
+    "Oncology – ROS1-positive NSCLC": "Oncology – NSCLC",
+    "Oncology – SCLC / Neuroendocrine Tumors": "Oncology – Neuroendocrine Tumors",
+    "Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)": "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (Urothelial Cancer, TNBC)": "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (adult and pediatric)": "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)": "Oncology – Solid Tumors",
+    "Oncology – Solid Tumors/NSCLC": "Oncology – NSCLC",
+    "Oncology – lung cancer, gastrointestinal cancer, ovarian cancer": "Oncology – Solid Tumors",
+    "Oncology; Immunology – multiple indications": "Oncology – Multiple Indications",
+    "Respiratory/Immunology – Asthma, Atopic Dermatitis": "Respiratory – Asthma",
+    "Women's Health – Fertility / Assisted Reproductive Technology": "Women's Health",
 }
 
 TERRITORY_EXACT = {
-    "Worldwide":                                                                                       "Global",
-    "Global (Hansoh retains option to co-promote or solely commercialize in China)":                  "Global",
-    "Global (exclusive rights to BioNTech)":                                                          "Global",
-    "Worldwide (Phase 1 asset) + ex-Greater China (Phase 1/2a asset)":                               "Global ex-Greater China",
+    "Worldwide": "Global",
+    "Global (Hansoh retains option to co-promote or solely commercialize in China)": "Global",
+    "Global (exclusive rights to BioNTech)": "Global",
+    "Worldwide (Phase 1 asset) + ex-Greater China (Phase 1/2a asset)": "Global ex-Greater China",
     "Worldwide (taletrectinib previously out-licensed in China to Innovent, Japan to Nippon Kayaku, Korea)": "Global",
     "Global ex-China (all territories outside mainland China, Hong Kong, Macau, Taiwan, and Russia)": "Global ex-China",
-    "Global ex-China (excluding Mainland China, Hong Kong, Macau and Taiwan)":                        "Global ex-China",
-    "Global ex-China (excluding mainland China, Hong Kong, Macau and Taiwan)":                        "Global ex-China",
-    "Global ex-China (excluding mainland China, Hong Kong, Macau, Taiwan)":                           "Global ex-China",
-    "Global ex-China (excluding mainland China, Hong Kong, and Macau)":                               "Global ex-China",
-    "Greater China and Singapore":                                                                     "Greater China",
-    "EU, UK, Switzerland and selected other countries":                                               "Europe",
+    "Global ex-China (excluding Mainland China, Hong Kong, Macau and Taiwan)": "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, Macau and Taiwan)": "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, Macau, Taiwan)": "Global ex-China",
+    "Global ex-China (excluding mainland China, Hong Kong, and Macau)": "Global ex-China",
+    "Greater China and Singapore": "Greater China",
+    "EU, UK, Switzerland and selected other countries": "Europe",
     "US, Canada, Europe, Japan (expanded in June 2024 to include Latin America, Middle East, Africa)": "Multiple Regions",
-    "Brazil and LATAM":                                                                               "Latin America",
-    "Not disclosed":                                                                                   "Not Disclosed",
+    "Brazil and LATAM": "Latin America",
+    "Not disclosed": "Not Disclosed",
 }
 
-# Keyword rules for fuzzy TA fallback — evaluated in order, first match wins.
-# Each entry: ([keywords], canonical_value)
-# More specific terms come before general ones to avoid false grabs.
 _TA_FUZZY_RULES = [
-    # ── Oncology subtypes ──────────────────────────────────────────────────────
     (["nsclc", "non-small cell lung"],                        "Oncology – NSCLC"),
     (["lung cancer"],                                         "Oncology – NSCLC"),
     (["sclc", "small cell lung"],                             "Oncology – Neuroendocrine Tumors"),
-    (["neuroendocrine", "net ", "carcinoid"],                 "Oncology – Neuroendocrine Tumors"),
+    (["neuroendocrine", "carcinoid"],                         "Oncology – Neuroendocrine Tumors"),
     (["breast cancer", "her2", "hr+", "tnbc"],                "Oncology – Breast Cancer"),
     (["ovarian", "fallopian", "peritoneal"],                  "Oncology – Ovarian Cancer"),
     (["gastric", "colorectal", "crc", "pdac", "pancreatic",
@@ -663,54 +674,42 @@ _TA_FUZZY_RULES = [
     (["lymphoma", "leukemia", "leukaemia", "myeloma",
       "cll", "mcl", "aml", "cml", "all", "nhl", "dlbcl"],    "Oncology – Lymphoma / Leukemia"),
     (["glioblastoma", "glioma", "gbm", "brain tumor",
-      "brain tumour", "cns cancer"],                          "Oncology – Solid Tumors"),
-    (["urothelial", "bladder cancer", "prostate",
-      "renal cell", "rcc", "cervical",
-      "endometrial", "head and neck", "sarcoma",
-      "mesothelioma", "thyroid cancer",
+      "brain tumour"],                                        "Oncology – Solid Tumors"),
+    (["urothelial", "bladder cancer", "prostate", "renal cell",
+      "cervical", "endometrial", "head and neck", "sarcoma",
       "solid tumor", "solid tumour", "advanced tumor"],       "Oncology – Solid Tumors"),
     (["oncology", "cancer", "tumor", "tumour",
       "carcinoma", "malignancy"],                             "Oncology – Multiple Indications"),
-    # ── Immunology subtypes ───────────────────────────────────────────────────
-    (["atopic dermatitis", "eczema", "ad "],                  "Immunology – Atopic Dermatitis"),
+    (["atopic dermatitis", "eczema"],                         "Immunology – Atopic Dermatitis"),
     (["ibd", "inflammatory bowel", "crohn",
       "ulcerative colitis"],                                  "Immunology – Inflammatory Bowel Disease"),
-    (["lupus", "sle", "lupus nephritis",
-      "systemic lupus"],                                      "Immunology – Lupus / Nephrology"),
+    (["lupus", "sle", "systemic lupus"],                      "Immunology – Lupus / Nephrology"),
     (["asthma", "allergic", "food allergy", "csu",
       "chronic urticaria", "rhinosinusitis"],                 "Immunology – Asthma / Allergic Disorders"),
     (["psoriasis", "psoriatic", "ankylosing",
-      "rheumatoid arthritis", "ra "],                         "Immunology – Psoriasis / Inflammatory"),
+      "rheumatoid arthritis"],                                "Immunology – Psoriasis / Inflammatory"),
     (["autoimmune", "immunology", "inflammatory"],            "Immunology – Multiple Indications"),
-    # ── Metabolic ─────────────────────────────────────────────────────────────
-    (["obesity", "weight loss", "glp-1", "glp1",
-      "anti-obesity"],                                        "Metabolic – Obesity"),
-    (["mash", "nash", "steatohepatitis",
-      "fatty liver", "masld"],                                "Metabolic – MASH / Liver"),
-    (["type 2 diabetes", "t2d", "type 2 dm",
-      "hba1c", "insulin"],                                    "Metabolic – Diabetes"),
+    (["obesity", "weight loss", "glp-1", "glp1"],             "Metabolic – Obesity"),
+    (["mash", "nash", "steatohepatitis", "fatty liver",
+      "masld"],                                               "Metabolic – MASH / Liver"),
+    (["type 2 diabetes", "t2d", "hba1c", "insulin"],          "Metabolic – Diabetes"),
     (["cardiometabolic", "metabolic syndrome"],               "Metabolic – Cardiometabolic"),
-    # ── Cardiovascular ────────────────────────────────────────────────────────
     (["dyslipidemia", "cholesterol", "ldl", "lp(a)",
       "triglyceride", "hyperlipidemia"],                      "Cardiovascular – Dyslipidemia"),
     (["cardiovascular", "cardiac", "heart failure",
       "hypertension", "hcm", "atrial fibrillation"],          "Cardiovascular – Cardiometabolic"),
-    # ── Nephrology ────────────────────────────────────────────────────────────
-    (["iga nephropathy", "igan", "berger"],                   "Nephrology – IgA Nephropathy"),
+    (["iga nephropathy", "igan"],                             "Nephrology – IgA Nephropathy"),
     (["nephrology", "kidney", "renal", "glomerular",
       "ckd", "fsgs"],                                         "Nephrology – Other"),
-    # ── Respiratory ───────────────────────────────────────────────────────────
     (["respiratory", "copd", "pulmonary fibrosis",
       "ipf", "pulmonary hypertension"],                       "Respiratory – Other"),
-    # ── Special ───────────────────────────────────────────────────────────────
     (["women", "fertility", "reproductive",
       "endometriosis", "assisted reproductive"],              "Women's Health"),
     (["rna", "sirna", "mrna", "oligonucleotide",
-      "antisense", "aso "],                                   "RNA Therapeutics – Platform"),
+      "antisense"],                                           "RNA Therapeutics – Platform"),
 ]
 
 def _ta_fuzzy(s: str) -> str | None:
-    """Return first keyword-matched canonical TA, or None."""
     sl = s.lower()
     for keywords, canonical in _TA_FUZZY_RULES:
         if any(kw in sl for kw in keywords):
@@ -718,19 +717,9 @@ def _ta_fuzzy(s: str) -> str | None:
     return None
 
 def normalize_therapeutic_area(s: str) -> str:
-    """
-    Three-tier normalization:
-      1. Already canonical  → pass through unchanged
-      2. Known exact variant → map via TA_EXACT
-      3. New wording         → fuzzy keyword match
-      4. No match            → keep raw + print warning for future triage
-    """
-    if not s:
-        return "Not Disclosed"
-    if s in TA_ENUM_SET:
-        return s
-    if s in TA_EXACT:
-        return TA_EXACT[s]
+    if not s: return "Not Disclosed"
+    if s in TA_ENUM_SET: return s
+    if s in TA_EXACT: return TA_EXACT[s]
     fuzzy = _ta_fuzzy(s)
     if fuzzy:
         print(f"  [TA fuzzy] {repr(s)} → {repr(fuzzy)}")
@@ -739,47 +728,28 @@ def normalize_therapeutic_area(s: str) -> str:
     return s
 
 def normalize_territory(s: str) -> str:
-    """
-    Three-tier normalization:
-      1. Already canonical  → pass through unchanged
-      2. Known exact variant → map via TERRITORY_EXACT
-      3. Fuzzy keyword match for common patterns
-      4. No match            → keep raw + print warning
-    """
-    if not s:
-        return "Not Disclosed"
-    if s in TERRITORY_ENUM_SET:
-        return s
-    if s in TERRITORY_EXACT:
-        return TERRITORY_EXACT[s]
+    if not s: return "Not Disclosed"
+    if s in TERRITORY_ENUM_SET: return s
+    if s in TERRITORY_EXACT: return TERRITORY_EXACT[s]
     sl = s.lower()
     if "ex-greater china" in sl or "ex greater china" in sl or (
             "excluding" in sl and "greater china" in sl):
         return "Global ex-Greater China"
-    if ("ex-china" in sl or "ex china" in sl
-            or ("excluding" in sl and "china" in sl)):
+    if "ex-china" in sl or "ex china" in sl or (
+            "excluding" in sl and "china" in sl):
         return "Global ex-China"
-    if "greater china" in sl:
-        return "Greater China"
-    if "worldwide" in sl:
-        return "Global"
-    if "mainland china" in sl or "china mainland" in sl:
-        return "China Mainland"
-    if "us" in sl and "europe" in sl:
-        return "US & Europe"
-    if "latam" in sl or "latin america" in sl:
-        return "Latin America"
-    if "eu" in sl or "europe" in sl or "uk" in sl:
-        return "Europe"
-    if "not disclosed" in sl or "undisclosed" in sl:
-        return "Not Disclosed"
+    if "greater china" in sl: return "Greater China"
+    if "worldwide" in sl: return "Global"
+    if "mainland china" in sl or "china mainland" in sl: return "China Mainland"
+    if "us" in sl and "europe" in sl: return "US & Europe"
+    if "latam" in sl or "latin america" in sl: return "Latin America"
+    if "eu" in sl or "europe" in sl or "uk" in sl: return "Europe"
+    if "not disclosed" in sl or "undisclosed" in sl: return "Not Disclosed"
     print(f"  [TERRITORY UNMATCHED] {repr(s)} — stored as-is; add to TERRITORY_EXACT to silence")
     return s
 
 def normalize_usd(s: str) -> str:
-    """Extract first clean dollar figure; return 'Not Disclosed' if none."""
-    if not s:
-        return "Not Disclosed"
+    if not s: return "Not Disclosed"
     s = s.strip()
     if re.match(r"(not disclosed|all-stock|double.digit million|~\$250M.*all-stock)", s, re.I):
         return "Not Disclosed"
@@ -900,6 +870,96 @@ def build_company_list(existing_deals: list, search_window: str = "") -> str:
     return "\n".join(lines)
 
 
+def build_modality_round(existing_deals: list, search_window: str = "") -> str:
+    """
+    Builds Round 3 modality queries dynamically from the live DB.
+    Ranks modalities by deal count so the highest-yield drug types are searched first.
+    On first run (empty DB) falls back to broad structural terms — no hardcoded names.
+    """
+    from collections import Counter
+    yr_match = re.search(r'\b(20\d{2})\b', search_window)
+    yr = yr_match.group(1) if yr_match else ""
+    yr_suffix = f" {yr}" if yr else ""
+
+    counts = Counter()
+    for d in existing_deals:
+        m = (d.get("modality") or "").strip()
+        if m and m.lower() not in ("", "other", "not disclosed"):
+            counts[m] += 1
+
+    lines = ["ROUND 3 — MODALITY / THERAPY SWEEPS via search_web_wide"]
+    if counts:
+        lines += [
+            f"  Auto-generated from DB ({len(counts)} modalities seen, ranked by frequency).",
+            f"  New modalities found in future runs are automatically included.",
+            "",
+        ]
+        for modality, n in counts.most_common():
+            lines.append(f'  Search: "China {modality} licensing deal{yr_suffix}"   ({n} deals in DB)')
+    else:
+        lines += [
+            "  DB is empty — using broad structural modality terms (not hardcoded to specific drugs).",
+            "",
+            f'  "China ADC antibody drug conjugate licensing{yr_suffix}"',
+            f'  "China bispecific antibody deal{yr_suffix}"',
+            f'  "China small molecule licensing{yr_suffix}"',
+            f'  "China monoclonal antibody licensing deal{yr_suffix}"',
+            f'  "China cell therapy CAR-T licensing{yr_suffix}"',
+            f'  "China GLP-1 metabolic disease deal{yr_suffix}"',
+            f'  "China siRNA mRNA oligonucleotide licensing{yr_suffix}"',
+            f'  "China gene therapy licensing deal{yr_suffix}"',
+        ]
+    return "\n".join(lines)
+
+
+def build_partner_round(existing_deals: list, search_window: str = "") -> str:
+    """
+    Builds Round 4 partner queries dynamically from the live DB.
+    Ranks foreign parties by deal count — most active buyers searched first.
+    On first run (empty DB) falls back to structural 'global pharma China' sweeps
+    with no hardcoded company names, so any buyer (Takeda, Roche, GSK, etc.) surfaces.
+    """
+    from collections import Counter
+    yr_match = re.search(r'\b(20\d{2})\b', search_window)
+    yr = yr_match.group(1) if yr_match else ""
+    yr_suffix = f" {yr}" if yr else ""
+
+    counts = Counter()
+    for d in existing_deals:
+        fp = (d.get("foreign_party") or "").strip()
+        if fp and fp.lower() not in ("", "not disclosed", "multiple", "various"):
+            counts[fp] += 1
+
+    lines = ["ROUND 4 — PARTNER-FOCUSED via search_web_wide"]
+    if counts:
+        lines += [
+            f"  Auto-generated from DB ({len(counts)} foreign partners seen, ranked by deal count).",
+            f"  New partners found in future runs are automatically included.",
+            "",
+        ]
+        for partner, n in counts.most_common(15):
+            lines.append(f'  Search: "{partner} China licensing{yr_suffix}"   ({n} deals in DB)')
+        lines += [
+            "",
+            "  Also run broad sweeps to surface buyers NOT yet in DB:",
+            f'  "global pharma China biotech deal{yr_suffix}"',
+            f'  "Japan pharma China licensing{yr_suffix}"',
+        ]
+    else:
+        lines += [
+            "  DB is empty — using structural sweeps only (no hardcoded company names).",
+            "  These will surface ANY Western buyer — Takeda, Roche, GSK, Sanofi, AbbVie, etc.",
+            "",
+            f'  "US pharma China biotech licensing deal{yr_suffix}"',
+            f'  "European pharma China licensing{yr_suffix}"',
+            f'  "Japan pharma China biotech deal{yr_suffix}"',
+            f'  "multinational pharma China licensing{yr_suffix}"',
+            f'  "global pharma China biotech deal{yr_suffix}"',
+            f'  "big pharma China licensing option{yr_suffix}"',
+        ]
+    return "\n".join(lines)
+
+
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
 def build_system_prompt(existing_deals: list, search_window: str = "",
@@ -913,7 +973,9 @@ def build_system_prompt(existing_deals: list, search_window: str = "",
     window_str = search_window if search_window else "Search all time."
 
     # Build dynamic company list from live DB
-    company_round = build_company_list(existing_deals, search_window)
+    company_round  = build_company_list(existing_deals, search_window)
+    modality_round = build_modality_round(existing_deals, search_window)
+    partner_round  = build_partner_round(existing_deals, search_window)
 
     # Compact query log — tells Claude exactly what it has already searched
     if completed_queries:
@@ -968,27 +1030,16 @@ Calling finish() early wastes the budget and leaves deals unfound.
 ═══════════════════════════════════════════════════
 
 - announcement_month_year: "Month YYYY" e.g. "March 2024"
-- deal_type: pick from enum — licensing-out | licensing-in | option-to-license | newco-spinout | platform-deal | co-development | partnership | M&A | acquisition
+- deal_type: {_pipe(DEAL_TYPE_ENUM)}
 - chinese_party: Chinese company name
 - foreign_party: non-Chinese partner (or NewCo name + backers)
 - asset: drug code + target + indication e.g. "HRS-5346 (oral Lp(a) inhibitor, cardiovascular)"
 - drug_name: code only — "HRS-5346" or "ivonescimab". No descriptions.
-- modality: Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC / Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide / Oligonucleotide / Other
-- therapeutic_area: pick the CLOSEST value from the fixed enum —
-    Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
-    Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
-    Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
-    Immunology – Atopic Dermatitis | Immunology – Inflammatory Bowel Disease |
-    Immunology – Lupus / Nephrology | Immunology – Asthma / Allergic Disorders |
-    Immunology – Psoriasis / Inflammatory | Immunology – Multiple Indications |
-    Metabolic – Obesity | Metabolic – Diabetes | Metabolic – Cardiometabolic | Metabolic – MASH / Liver |
-    Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
-    Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
-    Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
-  Use "Oncology – Solid Tumors" for broad solid-tumor assets without a more specific match.
-- stage: Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
-- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers, parenthetical notes, and "+" suffixes.
-- territory: Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
+- modality: {_pipe(MODALITY_ENUM)}
+- therapeutic_area: pick closest from — {_pipe_wrap(TA_ENUM)}
+- stage: {_pipe(STAGE_ENUM)}
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers and parenthetical notes.
+- territory: {_pipe_wrap(TERRITORY_ENUM)}
   "Worldwide" → Global. "Global ex-China (excluding ...)" → Global ex-China.
 - equity_component: e.g. "~20% stake in NewCo" or "None"
 - highlights: ONE sentence max — most notable fact (value, strategic angle, or record term)
@@ -1001,101 +1052,89 @@ opinion pieces, or any item missing a named Chinese company + named drug/asset.
  SEARCH STRATEGY — MANDATORY SEQUENCE
 ═══════════════════════════════════════════════════
 
-TOOL USAGE RULE — read this before every search:
-  search_web_wide  → PRIMARY tool for ALL discovery rounds (1, 3, 4, 5, 7).
-                     No domain restrictions — finds deals on press wires, IR pages,
-                     regional sites, and anywhere priority sources don't cover.
-  search_web       → ONLY used in ROUND 8 (priority deep-dive cleanup).
-                     Scoped to FierceBiotech / Endpoints / BioPharma Dive / Reuters etc.
-  search_web_cn    → ONLY used in ROUND 6 for Mandarin-language sources.
+TOOL USAGE:
+  search_web_wide → PRIMARY tool for ALL discovery rounds (1–7).
+                    No domain filter — finds deals on press wires, IR pages,
+                    regional sites, and anywhere priority outlets don't cover.
+  search_web      → ONLY Round 8 (priority-source cleanup).
+  search_web_cn   → ONLY Round 6 (Mandarin sweeps).
 
-You MUST work through ALL rounds in order. Do NOT repeat a query type.
+Do NOT hardcode specific company names, partner names, or drug names into queries
+in Rounds 3–7. These rounds use structural and ecosystem searches that work for
+any year. Specific known companies are already covered by the auto-generated
+Round 2 list. Specific named deals belong in --csv mode.
+
+Work through ALL rounds in order. Keep a mental checklist.
 
 ROUND 1 — MONTHLY SWEEPS via search_web_wide (12 searches)
-  "China biopharma licensing deal January 2024"
-  "China biopharma licensing deal February 2024"
-  ... (March through December)
-Each monthly search will surface different deals. Save ALL deals found in each.
+  "China biopharma licensing deal January {window_str}"
+  "China biopharma licensing deal February {window_str}"
+  ... (March through December — one search per month)
+Save ALL deals found before moving to the next month.
 
 {company_round}
 
-ROUND 3 — MODALITY / THERAPY SWEEPS via search_web_wide
-  "China ADC licensing deal 2024"
-  "China bispecific antibody licensing 2024"
-  "China GLP-1 obesity drug deal 2024"
-  "China KRAS inhibitor deal 2024"
-  "China CAR-T cell therapy licensing 2024"
-  "China siRNA oligonucleotide deal 2024"
+{modality_round}
 
-ROUND 4 — PARTNER-FOCUSED via search_web_wide
-  "AstraZeneca China licensing deal 2024"
-  "Pfizer China biotech deal 2024"
-  "Bristol Myers Squibb China deal 2024"
-  "Merck MSD China licensing 2024"
-  "Johnson & Johnson China biotech 2024"
+{partner_round}
 
-ROUND 5 — STRUCTURE SEARCHES via search_web_wide
-  "China biotech NewCo spinout 2024"
-  "China biopharma option agreement deal 2024"
-  "China licensing deal under $200M 2024"
+ROUND 5 — DEAL STRUCTURE SEARCHES via search_web_wide
+  "China biotech NewCo spinout deal {window_str}"
+  "China biopharma option agreement licensing {window_str}"
+  "China biotech small molecule licensing {window_str}"
+  "China biopharma preclinical deal {window_str}"
 
-ROUND 6 — CHINESE-LANGUAGE SEARCHES via search_web_cn
-  "中国生物科技 对外授权 2024"
-  "医药 license-out 交易 2024"
-  "普方生物 Genmab 授权"
-  "启愈生物 J&J 授权"
-  "奇璞生物 授权交易 2024"
-  "中国创新药 BD交易 2024 临床前"
-  "生物技术公司 跨境授权 2024"
-  "新药 license out 里程碑 2024"
+ROUND 6 — CHINESE-LANGUAGE SWEEPS via search_web_cn
+General Mandarin pattern searches only — no specific company or partner names.
+  "中国生物技术 对外授权 {window_str}"            (China biotech outbound licensing)
+  "医药 license-out 授权交易 {window_str}"        (pharma license-out deals)
+  "中国创新药 BD交易 {window_str}"                (China innovative drug BD deals)
+  "生物科技公司 跨境授权 {window_str}"             (biotech cross-border licensing)
+  "新药授权 里程碑付款 {window_str}"               (new drug licensing milestone payments)
+  "肿瘤 抗体 授权合作 {window_str}"               (oncology antibody licensing)
+  "ADC 授权 {window_str}"                        (ADC licensing)
+  "代谢病 授权 {window_str}"                     (metabolic disease licensing)
 
-ROUND 7 — CHINA-HQ ENGLISH-NAMED COMPANIES via search_web_wide
-  City-cluster searches:
-    "Shanghai biotech licensing deal 2024", "Suzhou biotech licensing deal 2024"
-    "Nanjing biotech deal 2024", "Beijing biopharmaceutical licensing 2024"
-    "Hangzhou biotech deal 2024", "Chengdu Zhuhai biotech licensing 2024"
-  VC portfolio searches:
-    "OrbiMed China portfolio biotech deal 2024"
-    "6 Dimensions Capital portfolio licensing 2024"
-    "Lilly Asia Ventures portfolio company deal 2024"
-    "Hillhouse Capital biotech licensing deal 2024"
-  Direct company searches:
-    "Allorion Therapeutics deal 2024", "AnHearts licensing 2024",
-    "Biotheus deal 2024", "BridGene Biosciences deal 2024",
-    "Chimagen GSK deal 2024", "Eccogene licensing 2024",
-    "Epimab BioTherapeutics deal 2024", "InSilico Medicine licensing 2024",
-    "Proteologix licensing 2024", "ProFoundBio Genmab 2024",
-    "Regor Therapeutics deal 2024", "Triastek BioNTech deal 2024"
+ROUND 7 — GEOGRAPHY & ECOSYSTEM via search_web_wide
+Do NOT name specific companies. Search by location and investor network to surface
+companies whose English names give no hint of their China origin.
+  City hubs:
+    "Shanghai biotech licensing deal {window_str}"
+    "Suzhou biotech licensing {window_str}"
+    "Beijing biopharmaceutical deal {window_str}"
+    "Hangzhou biotech licensing {window_str}"
+    "Guangzhou Shenzhen biotech deal {window_str}"
+  Investor ecosystems:
+    "OrbiMed China portfolio licensing {window_str}"
+    "6 Dimensions Capital biotech deal {window_str}"
+    "Lilly Asia Ventures portfolio licensing {window_str}"
+    "Hillhouse biotech licensing deal {window_str}"
   Set chinese_hq = "Yes" for all companies found in this round.
 
-ROUND 8 — PRIORITY SOURCE DEEP-DIVE via search_web (cleanup pass)
-Run after all wide discovery is complete. Catches deals that only appeared in
-premium outlets and were missed by the wide search:
-  "China biopharma licensing deal 2024 site:fiercebiotech.com"
-  "China licensing deal 2024 site:endpointsnews.com"
-  "China biotech deal 2024 site:biopharmadive.com"
-  "China licensing 2024 site:reuters.com"
-  "China biotech deal 2024 site:statnews.com"
+ROUND 8 — PRIORITY SOURCE CLEANUP via search_web
+  "China biopharma licensing {window_str} site:fiercebiotech.com"
+  "China licensing {window_str} site:endpointsnews.com"
+  "China biotech deal {window_str} site:biopharmadive.com"
+  "China licensing {window_str} site:reuters.com"
+  "China biotech {window_str} site:statnews.com"
 
 ═══════════════════════════════════════════════════
  SEARCH BUDGET REMINDER
 ═══════════════════════════════════════════════════
 
-Budget counts any search tool call (search_web_wide, search_web_cn, or search_web).
-Save calls are free — do as many save_deal() calls as you need after each search.
+Budget = any search tool call. Save calls are free.
 
 - Searches 1-12:   Monthly sweeps — search_web_wide (ROUND 1)
-- Searches 13-32:  Company-specific — search_web_wide (ROUND 2)
-- Searches 33-38:  Modality/therapy — search_web_wide (ROUND 3)
-- Searches 39-43:  Partner-focused — search_web_wide (ROUND 4)
-- Searches 44-46:  Structure searches — search_web_wide (ROUND 5)
-- Searches 47-54:  Chinese-language — search_web_cn (ROUND 6)
-- Searches 55-70:  China-HQ English-named — search_web_wide (ROUND 7)
-- Searches 71-75:  Priority deep-dive — search_web (ROUND 8)
+- Searches 13-32:  Company-specific — search_web_wide (ROUND 2, auto-generated)
+- Searches 33+:    Modality — search_web_wide (ROUND 3, auto-generated)
+- Searches cont.:  Partner — search_web_wide (ROUND 4, auto-generated)
+- Searches cont.:  Structure — search_web_wide (ROUND 5)
+- Searches cont.:  Chinese-language — search_web_cn (ROUND 6)
+- Searches cont.:  Geography/ecosystem — search_web_wide (ROUND 7)
+- Searches cont.:  Priority cleanup — search_web (ROUND 8)
 - Final:           finish() — only after ALL rounds complete
 
-After EACH search call, immediately call save_deal() for EVERY deal in the results
-before doing the next search. Save calls are free.
+After EACH search call, immediately save_deal() for EVERY deal found.
 
 DO NOT call finish() before completing at least ROUND 1, ROUND 2, and ROUND 7."""
 
@@ -1247,22 +1286,56 @@ def generate_dashboard(db: dict, search_window: str = ""):
     total        = len(deals)
 
     # ── Aggregations ─────────────────────────────────────────────────────────
+
+    def parse_usd_millions(s: str) -> float:
+        """Parse '$1.2B' → 1200.0, '$300M' → 300.0, anything else → 0."""
+        if not s:
+            return 0.0
+        m = re.search(r'\$([\d,]+(?:\.\d+)?)\s*B', s, re.I)
+        if m:
+            return float(m.group(1).replace(',', '')) * 1000
+        m = re.search(r'\$([\d,]+(?:\.\d+)?)\s*M', s, re.I)
+        if m:
+            return float(m.group(1).replace(',', ''))
+        return 0.0
+
     types           = {}
     areas           = {}
     chinese_parties = {}
     foreign_parties = {}
     months_raw      = {}
 
+    # Parallel value-sum dicts (total_value_usd in $M)
+    types_val   = {}
+    areas_val   = {}
+    cp_val      = {}
+    fp_val      = {}
+    months_val  = {}
+
     for d in deals:
-        t  = d.get("deal_type", "Other");        types[t]            = types.get(t, 0) + 1
-        a  = d.get("therapeutic_area", "Other"); areas[a]            = areas.get(a, 0) + 1
-        cp = d.get("chinese_party", "?");        chinese_parties[cp] = chinese_parties.get(cp, 0) + 1
+        v = parse_usd_millions(d.get("total_value_usd", ""))
+
+        t  = d.get("deal_type", "Other")
+        types[t]     = types.get(t, 0) + 1
+        types_val[t] = types_val.get(t, 0.0) + v
+
+        a  = d.get("therapeutic_area", "Other")
+        areas[a]     = areas.get(a, 0) + 1
+        areas_val[a] = areas_val.get(a, 0.0) + v
+
+        cp = d.get("chinese_party", "?")
+        chinese_parties[cp] = chinese_parties.get(cp, 0) + 1
+        cp_val[cp]          = cp_val.get(cp, 0.0) + v
+
         fp = d.get("foreign_party", "")
         if fp and fp.upper() not in ("N/A", "NA", "NONE", ""):
             foreign_parties[fp] = foreign_parties.get(fp, 0) + 1
+            fp_val[fp]          = fp_val.get(fp, 0.0) + v
+
         m  = d.get("announcement_month_year", "")
         if m:
             months_raw[m] = months_raw.get(m, 0) + 1
+            months_val[m] = months_val.get(m, 0.0) + v
 
     # Sort months chronologically
     MONTH_ORDER = ["January","February","March","April","May","June",
@@ -1276,7 +1349,7 @@ def generate_dashboard(db: dict, search_window: str = ""):
                 return (int(yr), mi)
         except (ValueError, IndexError):
             pass
-        return (9999, 0)  # malformed dates sort to the end
+        return (9999, 0)
 
     def fmt_date(label):
         """Convert 'Month YYYY' -> 'YY/MM', e.g. 'March 2024' -> '24/03'."""
@@ -1288,11 +1361,12 @@ def generate_dashboard(db: dict, search_window: str = ""):
                 return f"{yr[2:]}/{mi:02d}"
         except (ValueError, IndexError):
             pass
-        return label  # return as-is if malformed
+        return label
 
     months_sorted = sorted(months_raw.items(), key=lambda x: month_sort_key(x[0]))
-    month_labels  = [fmt_date(x[0]) for x in months_sorted]   # YY/MM for chart axis
+    month_labels  = [fmt_date(x[0]) for x in months_sorted]
     month_counts  = [x[1] for x in months_sorted]
+    month_values  = [round(months_val.get(x[0], 0.0), 1) for x in months_sorted]
 
     # Broad therapeutic area grouping, capped at 9
     def broad_area(a):
@@ -1306,11 +1380,14 @@ def generate_dashboard(db: dict, search_window: str = ""):
         if "rare"        in a_lower: return "Rare Disease"
         return "Other"
 
-    broad_areas = {}
+    broad_areas     = {}
+    broad_areas_val = {}
     for a in areas:
         b = broad_area(a)
-        broad_areas[b] = broad_areas.get(b, 0) + areas[a]
-    broad_areas = dict(sorted(broad_areas.items(), key=lambda x: -x[1])[:9])
+        broad_areas[b]     = broad_areas.get(b, 0) + areas[a]
+        broad_areas_val[b] = broad_areas_val.get(b, 0.0) + areas_val.get(a, 0.0)
+    broad_areas     = dict(sorted(broad_areas.items(), key=lambda x: -x[1])[:9])
+    broad_areas_val = {k: round(broad_areas_val.get(k, 0.0), 1) for k in broad_areas}
 
     top_area = max(broad_areas,     key=broad_areas.get)     if broad_areas     else "—"
     top_type = max(types,           key=types.get)           if types           else "—"
@@ -1380,17 +1457,25 @@ def generate_dashboard(db: dict, search_window: str = ""):
         for i, d in enumerate(reversed(deals))
     )
 
-    # Chart data as JSON
-    broad_labels_js = json.dumps(list(broad_areas.keys()))
-    broad_values_js = json.dumps(list(broad_areas.values()))
-    cn_labels_js    = json.dumps([x[0] for x in top_cn])
-    cn_values_js    = json.dumps([x[1] for x in top_cn])
-    fp_labels_js    = json.dumps([x[0] for x in top_fp])
-    fp_values_js    = json.dumps([x[1] for x in top_fp])
-    month_labels_js = json.dumps(month_labels)
-    month_values_js = json.dumps(month_counts)
-    set1_js         = json.dumps(SET1)
-    area_pal_js     = palette(len(broad_areas))
+    # Chart data as JSON — counts AND values for each dimension
+    broad_labels_js  = json.dumps(list(broad_areas.keys()))
+    broad_counts_js  = json.dumps(list(broad_areas.values()))
+    broad_values_js  = json.dumps(list(broad_areas_val.values()))
+
+    cn_labels_js     = json.dumps([x[0] for x in top_cn])
+    cn_counts_js     = json.dumps([x[1] for x in top_cn])
+    cn_values_js     = json.dumps([round(cp_val.get(x[0], 0.0), 1) for x in top_cn])
+
+    fp_labels_js     = json.dumps([x[0] for x in top_fp])
+    fp_counts_js     = json.dumps([x[1] for x in top_fp])
+    fp_values_js     = json.dumps([round(fp_val.get(x[0], 0.0), 1) for x in top_fp])
+
+    month_labels_js  = json.dumps(month_labels)
+    month_counts_js  = json.dumps(month_counts)
+    month_values_js  = json.dumps(month_values)
+
+    set1_js          = json.dumps(SET1)
+    area_pal_js      = palette(len(broad_areas))
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1443,6 +1528,12 @@ body{{background:var(--bg);color:var(--txt);font-family:var(--mono);font-size:13
 /* KEY FIX: chart wrapper scrolls; canvas has explicit px size set by JS */
 .chart-wrap{{overflow:hidden;height:220px}}
 .chart-wrap canvas{{display:block}}
+
+/* Chart mode toggle */
+.chart-toggle{{display:flex;gap:0;border:1px solid var(--brd);border-radius:5px;overflow:hidden;margin-left:auto}}
+.chart-toggle button{{background:none;border:none;color:var(--mut);font-family:var(--mono);font-size:10px;padding:3px 10px;cursor:pointer;transition:background .15s,color .15s;white-space:nowrap}}
+.chart-toggle button:hover{{background:#ffffff0a;color:var(--txt)}}
+.chart-toggle button.active{{background:var(--b);color:#fff}}
 
 /* Filters */
 .filters{{padding:10px 48px;display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--brd);background:var(--surf);flex-wrap:wrap}}
@@ -1531,16 +1622,26 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
   <div class="kpi"><div class="kpi-val" style="font-size:.9rem">{top_cp}</div><div class="kpi-lbl">Most Active Chinese Party</div><div class="kpi-sub">{chinese_parties.get(top_cp,0)} deals</div></div>
 </div>
 
+<!-- Chart mode toggle -->
+<div style="display:flex;align-items:center;padding:10px 22px 0;background:var(--surf);border-top:1px solid var(--brd);gap:12px">
+  <span style="font-size:10px;color:var(--mut);letter-spacing:.07em;text-transform:uppercase">Charts show</span>
+  <div class="chart-toggle">
+    <button id="btn-count" class="active" onclick="setMode('count')"># Deals</button>
+    <button id="btn-value" onclick="setMode('value')">Total Value ($M)</button>
+  </div>
+  <span id="val-note" style="font-size:10px;color:var(--mut);display:none">⚠ Deals with undisclosed values counted as $0</span>
+</div>
+
 <!-- Charts 2x2 -->
 <div class="charts-grid">
   <div class="chart-card">
-    <h3>Deals by Therapeutic Area <span class="pill">{len(broad_areas)} categories</span></h3>
+    <h3>by Therapeutic Area <span class="pill">{len(broad_areas)} categories</span></h3>
     <div class="chart-wrap" id="wrap-aC">
       <canvas id="aC"></canvas>
     </div>
   </div>
   <div class="chart-card">
-    <h3>Deals by Month <span class="pill">{len(month_labels)} months</span></h3>
+    <h3>by Month <span class="pill">{len(month_labels)} months</span></h3>
     <div class="chart-wrap" id="wrap-mC">
       <canvas id="mC"></canvas>
     </div>
@@ -1626,10 +1727,6 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 const S1  = {set1_js};
 const gc  = '#1d2535', tc = '#5a6a82';
 
-// ── KEY FIX: set canvas px size explicitly before creating chart ──────────────
-// Chart.js responsive mode measures the DOM parent, which breaks inside
-// overflow:auto containers. Instead we disable responsive mode and set
-// width/height directly on the canvas element, then let the wrapper scroll.
 function makeCanvas(id, w, h) {{
   const c = document.getElementById(id);
   c.width  = w;
@@ -1645,85 +1742,112 @@ function pal(n) {{
 
 const CHART_W = document.querySelector('.chart-wrap').parentElement.clientWidth - 44 || 460;
 
-// Therapeutic Area — horizontal bar
-new Chart(makeCanvas('aC', CHART_W, {area_h}), {{
-  type: 'bar',
-  data: {{
-    labels: {broad_labels_js},
-    datasets: [{{ data: {broad_values_js},
-      backgroundColor: pal({len(broad_areas)}).map(c=>c+'99'),
-      borderColor: pal({len(broad_areas)}),
-      borderWidth:1, borderRadius:3, borderSkipped:false }}]
+// ── Chart data — both modes ───────────────────────────────────────────────────
+const DATA = {{
+  area: {{
+    labels:  {broad_labels_js},
+    counts:  {broad_counts_js},
+    values:  {broad_values_js},
   }},
-  options: {{
-    responsive: false, maintainAspectRatio: false,
-    indexAxis: 'y',
-    plugins: {{ legend: {{ display:false }} }},
-    scales: {{
-      x: {{ ticks:{{color:tc,font:{{size:10}},stepSize:1}}, grid:{{color:gc}} }},
-      y: {{ ticks:{{color:'#dde3ee',font:{{size:11}}}}, grid:{{color:'transparent'}} }}
-    }}
-  }}
-}});
+  month: {{
+    labels:  {month_labels_js},
+    counts:  {month_counts_js},
+    values:  {month_values_js},
+  }},
+  cn: {{
+    labels:  {cn_labels_js},
+    counts:  {cn_counts_js},
+    values:  {cn_values_js},
+  }},
+  fp: {{
+    labels:  {fp_labels_js},
+    counts:  {fp_counts_js},
+    values:  {fp_values_js},
+  }},
+}};
 
-// Deals by Month — vertical bar
-new Chart(makeCanvas('mC', CHART_W, {month_h}), {{
-  type: 'bar',
-  data: {{
-    labels: {month_labels_js},
-    datasets: [{{ data: {month_values_js},
-      backgroundColor: S1[1]+'99', borderColor: S1[1],
-      borderWidth:1, borderRadius:3, borderSkipped:false }}]
-  }},
-  options: {{
-    responsive: false, maintainAspectRatio: false,
-    plugins: {{ legend: {{ display:false }} }},
-    scales: {{
-      x: {{ ticks:{{color:tc,font:{{size:10}},maxRotation:45,minRotation:30}}, grid:{{color:gc}} }},
-      y: {{ ticks:{{color:tc,font:{{size:10}},stepSize:1}}, grid:{{color:gc}} }}
-    }}
-  }}
-}});
+// ── Chart instances ───────────────────────────────────────────────────────────
+const CHARTS = {{}};
 
-// Top Chinese Parties — horizontal bar
-new Chart(makeCanvas('cnC', CHART_W, {cn_h}), {{
-  type: 'bar',
-  data: {{
-    labels: {cn_labels_js},
-    datasets: [{{ data: {cn_values_js},
-      backgroundColor: S1[0]+'88', borderColor: S1[0],
-      borderWidth:1, borderRadius:3, borderSkipped:false }}]
-  }},
-  options: {{
+function makeBarChart(id, w, h, labels, data, colors, indexAxis='y', xStepSize=null) {{
+  const opts = {{
     responsive: false, maintainAspectRatio: false,
-    indexAxis: 'y',
-    plugins: {{ legend: {{ display:false }} }},
+    indexAxis,
+    plugins: {{ legend: {{ display:false }},
+      tooltip: {{
+        callbacks: {{
+          label: ctx => {{
+            const v = ctx.parsed[indexAxis === 'y' ? 'x' : 'y'];
+            return currentMode === 'value'
+              ? ` ${{v >= 1000 ? (v/1000).toFixed(1)+'B' : v+'M'}}`
+              : ` ${{v}} deal${{v===1?'':'s'}}`;
+          }}
+        }}
+      }}
+    }},
     scales: {{
-      x: {{ ticks:{{color:tc,font:{{size:10}},stepSize:1}}, grid:{{color:gc}} }},
-      y: {{ ticks:{{color:'#dde3ee',font:{{size:11}}}}, grid:{{color:'transparent'}} }}
+      x: {{
+        ticks: {{ color:tc, font:{{size:10}},
+          ...(indexAxis==='x' ? {{maxRotation:45,minRotation:30}} : {{stepSize: xStepSize||1}}),
+          callback: v => currentMode==='value'
+            ? (v>=1000 ? '$'+(v/1000).toFixed(0)+'B' : '$'+v+'M')
+            : v
+        }},
+        grid: {{color:gc}}
+      }},
+      y: {{
+        ticks: {{ color: indexAxis==='y' ? '#dde3ee' : tc, font:{{size: indexAxis==='y' ? 11 : 10}},
+          ...(indexAxis==='x' ? {{stepSize: xStepSize||1,
+            callback: v => currentMode==='value'
+              ? (v>=1000 ? '$'+(v/1000).toFixed(0)+'B' : '$'+v+'M')
+              : v
+          }} : {{}})
+        }},
+        grid: {{color: indexAxis==='y' ? 'transparent' : gc}}
+      }}
     }}
-  }}
-}});
+  }};
+  const chart = new Chart(makeCanvas(id, w, h), {{
+    type: 'bar',
+    data: {{
+      labels,
+      datasets: [{{
+        data,
+        backgroundColor: (Array.isArray(colors) ? colors : Array(labels.length).fill(colors))
+          .map(c => c+'99'),
+        borderColor: (Array.isArray(colors) ? colors : Array(labels.length).fill(colors)),
+        borderWidth:1, borderRadius:3, borderSkipped:false
+      }}]
+    }},
+    options: opts
+  }});
+  return chart;
+}}
 
-// Top Foreign Parties — horizontal bar
-new Chart(makeCanvas('fpC', CHART_W, {fp_h}), {{
-  type: 'bar',
-  data: {{
-    labels: {fp_labels_js},
-    datasets: [{{ data: {fp_values_js},
-      backgroundColor: S1[1]+'88', borderColor: S1[1],
-      borderWidth:1, borderRadius:3, borderSkipped:false }}]
-  }},
-  options: {{
-    responsive: false, maintainAspectRatio: false,
-    indexAxis: 'y',
-    plugins: {{ legend: {{ display:false }} }},
-    scales: {{
-      x: {{ ticks:{{color:tc,font:{{size:10}},stepSize:1}}, grid:{{color:gc}} }},
-      y: {{ ticks:{{color:'#dde3ee',font:{{size:11}}}}, grid:{{color:'transparent'}} }}
-    }}
-  }}
-}});
+let currentMode = 'count';
+
+function buildCharts(mode) {{
+  const d = (key) => mode === 'count' ? DATA[key].counts : DATA[key].values;
+
+  // destroy existing
+  Object.values(CHARTS).forEach(c => c.destroy());
+
+  CHARTS.area = makeBarChart('aC',  CHART_W, {area_h},  DATA.area.labels,  d('area'),  pal({len(broad_areas)}));
+  CHARTS.month= makeBarChart('mC',  CHART_W, {month_h}, DATA.month.labels, d('month'), S1[1], 'x');
+  CHARTS.cn   = makeBarChart('cnC', CHART_W, {cn_h},    DATA.cn.labels,    d('cn'),    S1[0]);
+  CHARTS.fp   = makeBarChart('fpC', CHART_W, {fp_h},    DATA.fp.labels,    d('fp'),    S1[1]);
+}}
+
+function setMode(mode) {{
+  currentMode = mode;
+  document.getElementById('btn-count').classList.toggle('active', mode==='count');
+  document.getElementById('btn-value').classList.toggle('active', mode==='value');
+  document.getElementById('val-note').style.display = mode==='value' ? 'inline' : 'none';
+  buildCharts(mode);
+}}
+
+// Initial render
+buildCharts('count');
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 function filt() {{
@@ -2021,32 +2145,18 @@ and save it using save_deal().
 ═══════════════════════════════════════════════════
 
 - announcement_month_year: "Month YYYY" e.g. "March 2024". If only year known, use "January YYYY".
-- deal_type: licensing-out | licensing-in | option-to-license | newco-spinout |
-             platform-deal | co-development | partnership | M&A | acquisition
+- deal_type: {_pipe(DEAL_TYPE_ENUM)}
 - chinese_party:    use EXACTLY the name from the CSV row (only fix spelling/punctuation)
 - foreign_party:    use EXACTLY the name from the CSV row (only fix spelling/punctuation)
 - asset:            drug code + target + indication e.g. "SHR-1819 (TSLP mAb, asthma)"
 - drug_name:        code only — "SHR-1819". No descriptions.
-- modality:         Small Molecule / Monoclonal Antibody / Bispecific Antibody / ADC /
-                    Cell Therapy / Gene Therapy / siRNA / mRNA / Fusion Protein / Peptide /
-                    Oligonucleotide / Other
-- therapeutic_area: pick the CLOSEST value from the fixed enum —
-    Oncology – Solid Tumors | Oncology – NSCLC | Oncology – Breast Cancer |
-    Oncology – Gastrointestinal Cancer | Oncology – Lymphoma / Leukemia |
-    Oncology – Ovarian Cancer | Oncology – Neuroendocrine Tumors | Oncology – Multiple Indications |
-    Immunology – Atopic Dermatitis | Immunology – Inflammatory Bowel Disease |
-    Immunology – Lupus / Nephrology | Immunology – Asthma / Allergic Disorders |
-    Immunology – Psoriasis / Inflammatory | Immunology – Multiple Indications |
-    Metabolic – Obesity | Metabolic – Diabetes | Metabolic – Cardiometabolic | Metabolic – MASH / Liver |
-    Cardiovascular – Dyslipidemia | Cardiovascular – Cardiometabolic |
-    Nephrology – IgA Nephropathy | Nephrology – Other | Respiratory – Asthma | Respiratory – Other |
-    Women's Health | RNA Therapeutics – Platform | Multiple Indications | Not Disclosed
-  Use "Oncology – Solid Tumors" for broad solid-tumor assets without a more specific match.
-- stage:            Preclinical / Phase 1 / Phase 2 / Phase 3 / Approved / Platform
-- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers, parenthetical notes, and "+" suffixes.
-- territory:        Global | Global ex-China | Global ex-Greater China | Greater China | China Mainland | US & Europe | Europe | Asia ex-China | Latin America | Multiple Regions | Not Disclosed
+- modality:         {_pipe(MODALITY_ENUM)}
+- therapeutic_area: pick closest from — {_pipe_wrap(TA_ENUM)}
+- stage:            {_pipe(STAGE_ENUM)}
+- total_value_usd / upfront_usd: single clean figure e.g. "$1.2B", "$300M", "Not Disclosed" — strip all qualifiers and parenthetical notes.
+- territory:        {_pipe_wrap(TERRITORY_ENUM)}
   "Worldwide" → Global. "Global ex-China (excluding ...)" → Global ex-China.
-- chinese_hq:       "Yes" / "No" / "Unknown" — set "Yes" even for English-sounding
+- chinese_hq:       {_pipe(CHINESE_HQ_ENUM)} — set "Yes" even for English-sounding
                     China-founded companies (ProFoundBio, Regor, AnHearts, LaNova, etc.)
 - highlights:       ONE sentence — most notable fact about this deal
 - source_url / source_name: article URL and publication name
