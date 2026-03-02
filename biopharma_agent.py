@@ -1821,6 +1821,12 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 </div>
 
 <!-- KPIs -->
+<div style="margin:0;padding:9px 20px;background:#1a1a0e;border-bottom:1px solid #3a3510;font-size:11.5px;color:#a89640;display:flex;align-items:center;gap:8px">
+  <span style="font-size:14px">⚠</span>
+  <span><strong style="color:#c8b048">Data Disclaimer:</strong> Deal information is AI-parsed from public sources with limited manual inspection. Terms, dates, values, and classifications may contain errors or omissions. Verify against primary sources before relying on this data for investment or business decisions.</span>
+</div>
+
+<!-- KPIs -->
 <div class="kpis">
   <div class="kpi"><div class="kpi-val">{total}</div><div class="kpi-lbl">Total Deals</div><div class="kpi-sub">in database</div></div>
   {year_kpi_html}
@@ -1881,7 +1887,7 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 
 <!-- Table -->
 <div style="display:flex;justify-content:flex-end;padding:6px 14px 2px;background:var(--bg)">
-  <button onclick="exportCSV()" style="background:none;border:1px solid var(--brd);color:var(--mut);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;cursor:pointer" onmouseover="this.style.color='var(--txt)';this.style.borderColor='var(--txt)'" onmouseout="this.style.color='var(--mut)';this.style.borderColor='var(--brd)'">&#8595; Export CSV</button>
+  <button disabled title="CSV export not available" style="background:none;border:1px solid var(--brd);color:var(--mut);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;opacity:0.35;cursor:not-allowed">&#8595; Export CSV</button>
 </div>
 <div class="tw">
   <table>
@@ -3052,23 +3058,43 @@ Strategy order:
 
     # Build discovery system prompt with updated round order
     def _build_discovery_prompt_rounds(window_str: str, existing_deals: list) -> str:
-        """Returns the strategy block injected into the discovery system prompt."""
+        """Returns the strategy block injected into the discovery system prompt.
+        Option A: No company-specific R6 — discovery uses wide structural queries only.
+        Option B: R1 is window-aware — only generates month queries for months in scope.
+        """
+        import re as _re
         modality_round = build_modality_round(existing_deals, window_str)
         partner_round  = build_partner_round(existing_deals, window_str)
-        company_round  = build_company_list(existing_deals, window_str)
+        # Note: company_round intentionally NOT built here — R6 removed from discovery mode.
+        # Company-specific sweeps only run in targeted mode (--target / -t).
+
+        # Option B: window-aware R1 — detect quarter and generate only in-scope months
+        _all_months = ["January","February","March","April","May","June",
+                       "July","August","September","October","November","December"]
+        _quarter_months = {"Q1":[1,2,3], "Q2":[4,5,6], "Q3":[7,8,9], "Q4":[10,11,12]}
+        _qm = _re.search(r'\b(Q[1-4])\b', window_str.upper())
+        if _qm:
+            _active = [_all_months[i-1] for i in _quarter_months[_qm.group(1)]]
+        else:
+            _active = _all_months  # full year or unspecified → all 12
+        r1_queries   = "\n".join(f'  "China biopharma licensing deal {mo} {window_str}"'
+                                  for mo in _active)
+        r1_count     = len(_active)
+        r1_note      = f"({r1_count} searches — {'quarter window' if _qm else 'full year'})"
 
         return f"""TOOL USAGE:
-  search_web_wide → R1, R2, R3, R6, R7, R8 — open web, no domain filter
+  search_web_wide → R1, R2, R3, R7, R8 — open web, no domain filter
   search_web      → R4 only — priority English sources (domain-restricted)
   search_web_cn   → R5 only — Chinese-language sources
 
+NOTE: Company-specific sweeps are NOT part of discovery mode. Use targeted mode
+(python biopharma_agent.py target <csv>) to search for deals by specific company name.
+
 Work ALL rounds in order. Keep a mental checklist.
 
-R1 — MONTHLY SWEEPS  (search_web_wide, 12 searches)
-  One search per month in the window. Saves ALL deals before next month.
-  "China biopharma licensing deal January {window_str}"
-  "China biopharma licensing deal February {window_str}"
-  ... (continue through all months in window)
+R1 — MONTHLY SWEEPS  (search_web_wide, {r1_count} searches) {r1_note}
+  One search per month in the window. Save ALL deals found before moving to next month.
+{r1_queries}
 
 R2 — WIDE STRUCTURAL DISCOVERY  (search_web_wide, ~8 searches)
   No company names. Structural queries only — surface companies not yet in DB.
@@ -3102,10 +3128,6 @@ R5 — CHINESE TRUSTED SOURCES  (search_web_cn, ~8 searches)
   "ADC 授权 {window_str}"                        (ADC licensing)
   "代谢病 授权 {window_str}"                     (metabolic disease licensing)
 
-{company_round.replace("ROUND 2", "R6")}
-IMPORTANT for R6: Only search companies if the deal would fall within the window: {window_str}
-Do NOT save deals outside the window even if you find them while searching company names.
-
 R7 — GEOGRAPHY & ECOSYSTEM  (search_web_wide, ~9 searches)
   "Shanghai biotech licensing deal {window_str}"
   "Suzhou biotech licensing {window_str}"
@@ -3128,8 +3150,9 @@ R8 — DEAL STRUCTURE SWEEPS  (search_web_wide, ~4 searches)
  SEARCH BUDGET REMINDER
 ═══════════════════════════════════════════════════
 Budget = any search call. Save calls are free.
-R1: 12  |  R2: 8  |  R3: ~8  |  R4: 5  |  R5: 8  |  R6: varies  |  R7: 9  |  R8: 4
-Total target: ~55–65 searches for a full run.
+R1: {r1_count}  |  R2: 8  |  R3: ~8  |  R4: 5  |  R5: 8  |  R7: 9  |  R8: 4
+Total target: ~{r1_count + 42}–{r1_count + 47} searches for a full run.
+(R6 company sweeps removed from discovery — use targeted mode for company-specific search.)
 
 DO NOT call finish() before completing at least R1, R2, R4, R5, and R7."""
 
