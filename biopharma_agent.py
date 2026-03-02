@@ -96,6 +96,7 @@ TA_ENUM = [
     # Major Pharma Vertical – largest global R&D area
     "Oncology - Lung",
     "Oncology - Breast",
+    "Oncology - Hematologic",
     "Oncology - Other",
     
     # Immunology & Inflammation
@@ -118,7 +119,6 @@ TA_ENUM = [
     "Vaccines",
 
     # Specialty verticals
-    "Hematology (Non-Oncology)",
     "Ophthalmology",
     "Dermatology",
     "Endocrinology (Non-Metabolic)",
@@ -245,6 +245,54 @@ def canon_company(s: str) -> str:
     """Canonical company key for dedup — collapses name variants."""
     n = normalize_name(s)
     return _COMPANY_ALIASES.get(n, n)
+
+# Preferred display name for each canonical key.
+# If a key isn't listed here the original string is kept as-is.
+_DISPLAY_NAME = {
+    # Chinese parties
+    'hengrui':          'Hengrui',
+    'cspc':             'CSPC',
+    'fosun':            'Fosun Pharma',
+    'hansoh':           'Hansoh Pharma',
+    'duality':          'Duality Biologics',
+    'lanova':           'LaNova Medicines',
+    'akeso':            'Akeso',
+    'argo':             'Argo Biopharma',
+    'kelun':            'Kelun Biotech',
+    'simcere':          'Simcere Pharmaceutical',
+    'earendil':         'Earendil Labs',
+    'chiatai':          'Jiangsu Chia Tai Feng Hai',
+    'sinobiopharm':     'Sino Biopharmaceutical',
+    'systimmune':       'SystImmune',
+    'immuneoncobiopharma': 'ImmuneOnco Biopharma',
+    'suzhouribolife':   'Suzhou Ribo Life Science',
+    'curon':            'Curon Biopharma',
+    'innovent':         'Innovent Biologics',
+    # Western parties
+    'merck':            'Merck',
+    'astrazeneca':      'AstraZeneca',
+    'gsk':              'GSK',
+    'bms':              'Bristol Myers Squibb',
+    'roche':            'Roche',
+    'lilly':            'Eli Lilly',
+    'jnj':              'Johnson & Johnson',
+    'gilead':           'Gilead Sciences',
+    'pfizer':           'Pfizer',
+    'novartis':         'Novartis',
+    'sanofi':           'Sanofi',
+    'takeda':           'Takeda',
+    'abbvie':           'AbbVie',
+}
+
+def normalize_company_name(s: str) -> str:
+    """Resolve any name variant to its preferred display string.
+    Falls back to the original if no alias or display name is found."""
+    if not s:
+        return s
+    key = _COMPANY_ALIASES.get(normalize_name(s))
+    if key is None:
+        return s                          # unknown company — keep as-is
+    return _DISPLAY_NAME.get(key, s)     # known alias but no display → keep original
 
 def drug_names_match(a: str, b: str) -> bool:
     """Fuzzy: catches SSGJ-707 vs PD-1/VEGF, LM-299 vs generic description, etc."""
@@ -562,6 +610,8 @@ def search_web_wide(query: str) -> str:
             return f"Search error: {e}"
     else:
         return "No Tavily API key — wide search unavailable."
+
+def sanitize_date(raw: str) -> str:
     """Ensure announcement_month_year is 'Month YYYY'. Fallback to current month."""
     if not raw:
         return datetime.now().strftime("%B %Y")
@@ -627,43 +677,79 @@ TA_ENUM_SET        = set(TA_ENUM)
 TERRITORY_ENUM_SET = set(TERRITORY_ENUM)
 
 TA_EXACT = {
-    "Autoimmune": "Immunology – Multiple Indications",
-    "Autoimmune / Immunology": "Immunology – Multiple Indications",
-    "Autoimmune / Oncology – B-NHL": "Oncology – Lymphoma / Leukemia",
-    "Autoimmune / Oncology – Multiple Myeloma": "Oncology – Lymphoma / Leukemia",
-    "Autoimmune Diseases": "Immunology – Multiple Indications",
-    "Cardiovascular – Cardiometabolic diseases": "Cardiovascular – Cardiometabolic",
-    "Immunology – Allergic Disorders (food allergy, asthma, CSU)": "Immunology – Asthma / Allergic Disorders",
-    "Immunology – Atopic Dermatitis, Asthma": "Immunology – Atopic Dermatitis",
-    "Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps": "Immunology – Atopic Dermatitis",
-    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)": "Immunology – Psoriasis / Inflammatory",
-    "Immunology – Inflammatory Bowel Disease (IBD)": "Immunology – Inflammatory Bowel Disease",
-    "Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis": "Immunology – Lupus / Nephrology",
-    "Metabolic – Obesity / Cardiometabolic": "Metabolic – Obesity",
-    "Metabolic – Obesity/Type 2 Diabetes": "Metabolic – Obesity",
-    "Metabolic – Type 2 Diabetes / MASH": "Metabolic – Diabetes",
-    "Multiple – oral RNA therapeutics": "RNA Therapeutics – Platform",
-    "Not disclosed (likely Oncology based on BioNTech pipeline focus)": "Not Disclosed",
-    "Oncology": "Oncology – Multiple Indications",
-    "Oncology – Advanced Solid Tumors": "Oncology – Solid Tumors",
-    "Oncology – Breast Cancer (HR+/HER2-)": "Oncology – Breast Cancer",
-    "Oncology – Chronic Myeloid Leukemia (CML)": "Oncology – Lymphoma / Leukemia",
-    "Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors": "Oncology – Breast Cancer",
-    "Oncology – NSCLC, SCLC, TNBC": "Oncology – NSCLC",
-    "Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases": "Oncology – Lymphoma / Leukemia",
-    "Oncology – Ovarian Cancer / Solid Tumors": "Oncology – Ovarian Cancer",
-    "Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)": "Oncology – Solid Tumors",
-    "Oncology – ROS1-positive NSCLC": "Oncology – NSCLC",
-    "Oncology – SCLC / Neuroendocrine Tumors": "Oncology – Neuroendocrine Tumors",
-    "Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)": "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (Urothelial Cancer, TNBC)": "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (adult and pediatric)": "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)": "Oncology – Solid Tumors",
-    "Oncology – Solid Tumors/NSCLC": "Oncology – NSCLC",
-    "Oncology – lung cancer, gastrointestinal cancer, ovarian cancer": "Oncology – Solid Tumors",
-    "Oncology; Immunology – multiple indications": "Oncology – Multiple Indications",
-    "Respiratory/Immunology – Asthma, Atopic Dermatitis": "Respiratory – Asthma",
-    "Women's Health – Fertility / Assisted Reproductive Technology": "Women's Health",
+    # ── Old fine-grained Oncology values → new flat taxonomy ──────────────────
+    "Oncology":                                                          "Oncology - Other",
+    "Oncology – Multiple Indications":                                   "Oncology - Other",
+    "Oncology – Solid Tumors":                                           "Oncology - Other",
+    "Oncology – Advanced Solid Tumors":                                  "Oncology - Other",
+    "Oncology – Solid Tumors (adult and pediatric)":                     "Oncology - Other",
+    "Oncology – Solid Tumors (Urothelial Cancer, TNBC)":                 "Oncology - Other",
+    "Oncology – Solid Tumors (MTAP-deleted; glioblastoma, pancreatic cancer, NSCLC)": "Oncology - Other",
+    "Oncology – Solid Tumors (lung cancer, gastrointestinal tumors)":    "Oncology - Other",
+    "Oncology – lung cancer, gastrointestinal cancer, ovarian cancer":   "Oncology - Other",
+    "Oncology – NSCLC":                                                  "Oncology - Lung",
+    "Oncology – Solid Tumors/NSCLC":                                     "Oncology - Lung",
+    "Oncology – ROS1-positive NSCLC":                                    "Oncology - Lung",
+    "Oncology – NSCLC, SCLC, TNBC":                                     "Oncology - Lung",
+    "Oncology – Breast Cancer":                                          "Oncology - Breast",
+    "Oncology – Breast Cancer (HR+/HER2-)":                              "Oncology - Breast",
+    "Oncology – HR+/HER2- Breast Cancer & Advanced Solid Tumors":        "Oncology - Breast",
+    "Oncology – Ovarian Cancer":                                         "Oncology - Other",
+    "Oncology – Ovarian Cancer / Solid Tumors":                          "Oncology - Other",
+    "Oncology – Gastrointestinal Cancer":                                "Oncology - Other",
+    "Oncology – RAS-mutant solid tumors (PDAC, CRC, NSCLC)":            "Oncology - Other",
+    "Oncology – Lymphoma / Leukemia":                                    "Oncology - Hematologic",
+    "Oncology – Chronic Myeloid Leukemia (CML)":                        "Oncology - Hematologic",
+    "Oncology – Non-Hodgkin Lymphoma / ALL; Autoimmune Diseases":        "Oncology - Hematologic",
+    "Autoimmune / Oncology – B-NHL":                                     "Oncology - Hematologic",
+    "Autoimmune / Oncology – Multiple Myeloma":                         "Oncology - Hematologic",
+    "Oncology – Neuroendocrine Tumors":                                  "Oncology - Other",
+    "Oncology – SCLC / Neuroendocrine Tumors":                          "Oncology - Other",
+    "Oncology; Immunology – multiple indications":                       "Multiple Indications",
+
+    # ── Old Immunology values ─────────────────────────────────────────────────
+    "Autoimmune":                                                        "Immunology / Inflammation",
+    "Autoimmune / Immunology":                                           "Immunology / Inflammation",
+    "Autoimmune Diseases":                                               "Immunology / Inflammation",
+    "Immunology – Multiple Indications":                                 "Immunology / Inflammation",
+    "Immunology – Atopic Dermatitis":                                    "Dermatology",
+    "Immunology – Atopic Dermatitis, Asthma":                           "Dermatology",
+    "Immunology – Atopic Dermatitis, Asthma, Chronic Rhinosinusitis with Nasal Polyps": "Dermatology",
+    "Immunology – Allergic Disorders (food allergy, asthma, CSU)":      "Immunology / Inflammation",
+    "Immunology – Inflammatory Bowel Disease":                           "Gastroenterology / Hepatology",
+    "Immunology – Inflammatory Bowel Disease (IBD)":                    "Gastroenterology / Hepatology",
+    "Immunology – Autoimmune diseases (psoriasis, Crohn's disease, ulcerative colitis)": "Immunology / Inflammation",
+    "Immunology – Lupus / Nephrology":                                   "Nephrology",
+    "Immunology – Systemic Lupus Erythematosus (SLE) / Lupus Nephritis": "Nephrology",
+    "Immunology – Asthma / Allergic Disorders":                         "Respiratory",
+    "Immunology – Psoriasis / Inflammatory":                             "Dermatology",
+    "Respiratory/Immunology – Asthma, Atopic Dermatitis":               "Respiratory",
+
+    # ── Old Metabolic/Cardiovascular values ───────────────────────────────────
+    "Metabolic – Obesity":                                               "Metabolic",
+    "Metabolic – Obesity / Cardiometabolic":                             "Metabolic",
+    "Metabolic – Obesity/Type 2 Diabetes":                              "Metabolic",
+    "Metabolic – Diabetes":                                              "Metabolic",
+    "Metabolic – Type 2 Diabetes / MASH":                               "Metabolic",
+    "Metabolic – Cardiometabolic":                                       "Cardiovascular",
+    "Metabolic – MASH / Liver":                                          "Gastroenterology / Hepatology",
+    "Cardiovascular – Dyslipidemia":                                     "Cardiovascular",
+    "Cardiovascular – Cardiometabolic":                                  "Cardiovascular",
+    "Cardiovascular – Cardiometabolic diseases":                         "Cardiovascular",
+
+    # ── Old Nephrology/Respiratory values ─────────────────────────────────────
+    "Nephrology – IgA Nephropathy":                                      "Nephrology",
+    "Nephrology – Other":                                                "Nephrology",
+    "Respiratory – Asthma":                                              "Respiratory",
+    "Respiratory – Other":                                               "Respiratory",
+
+    # ── Old platform/other values ─────────────────────────────────────────────
+    "RNA Therapeutics – Platform":                                       "Platform / Technology",
+    "Multiple – oral RNA therapeutics":                                  "Platform / Technology",
+    "Women's Health":                                                    "Multiple Indications",
+    "Women's Health – Fertility / Assisted Reproductive Technology":     "Multiple Indications",
+    "Not disclosed (likely Oncology based on BioNTech pipeline focus)":  "Not Disclosed",
+    "Not disclosed":                                                     "Not Disclosed",
 }
 
 TERRITORY_EXACT = {
@@ -685,51 +771,98 @@ TERRITORY_EXACT = {
 }
 
 _TA_FUZZY_RULES = [
-    (["nsclc", "non-small cell lung"],                        "Oncology – NSCLC"),
-    (["lung cancer"],                                         "Oncology – NSCLC"),
-    (["sclc", "small cell lung"],                             "Oncology – Neuroendocrine Tumors"),
-    (["neuroendocrine", "carcinoid"],                         "Oncology – Neuroendocrine Tumors"),
-    (["breast cancer", "her2", "hr+", "tnbc"],                "Oncology – Breast Cancer"),
-    (["ovarian", "fallopian", "peritoneal"],                  "Oncology – Ovarian Cancer"),
-    (["gastric", "colorectal", "crc", "pdac", "pancreatic",
-      "biliary", "cholangiocarcinoma", "hepatocellular",
-      "gastrointestinal", "gi cancer"],                       "Oncology – Gastrointestinal Cancer"),
-    (["lymphoma", "leukemia", "leukaemia", "myeloma",
-      "cll", "mcl", "aml", "cml", "all", "nhl", "dlbcl"],    "Oncology – Lymphoma / Leukemia"),
-    (["glioblastoma", "glioma", "gbm", "brain tumor",
-      "brain tumour"],                                        "Oncology – Solid Tumors"),
-    (["urothelial", "bladder cancer", "prostate", "renal cell",
-      "cervical", "endometrial", "head and neck", "sarcoma",
-      "solid tumor", "solid tumour", "advanced tumor"],       "Oncology – Solid Tumors"),
-    (["oncology", "cancer", "tumor", "tumour",
-      "carcinoma", "malignancy"],                             "Oncology – Multiple Indications"),
-    (["atopic dermatitis", "eczema"],                         "Immunology – Atopic Dermatitis"),
-    (["ibd", "inflammatory bowel", "crohn",
-      "ulcerative colitis"],                                  "Immunology – Inflammatory Bowel Disease"),
-    (["lupus", "sle", "systemic lupus"],                      "Immunology – Lupus / Nephrology"),
-    (["asthma", "allergic", "food allergy", "csu",
-      "chronic urticaria", "rhinosinusitis"],                 "Immunology – Asthma / Allergic Disorders"),
-    (["psoriasis", "psoriatic", "ankylosing",
-      "rheumatoid arthritis"],                                "Immunology – Psoriasis / Inflammatory"),
-    (["autoimmune", "immunology", "inflammatory"],            "Immunology – Multiple Indications"),
-    (["obesity", "weight loss", "glp-1", "glp1"],             "Metabolic – Obesity"),
-    (["mash", "nash", "steatohepatitis", "fatty liver",
-      "masld"],                                               "Metabolic – MASH / Liver"),
-    (["type 2 diabetes", "t2d", "hba1c", "insulin"],          "Metabolic – Diabetes"),
-    (["cardiometabolic", "metabolic syndrome"],               "Metabolic – Cardiometabolic"),
-    (["dyslipidemia", "cholesterol", "ldl", "lp(a)",
-      "triglyceride", "hyperlipidemia"],                      "Cardiovascular – Dyslipidemia"),
-    (["cardiovascular", "cardiac", "heart failure",
-      "hypertension", "hcm", "atrial fibrillation"],          "Cardiovascular – Cardiometabolic"),
-    (["iga nephropathy", "igan"],                             "Nephrology – IgA Nephropathy"),
-    (["nephrology", "kidney", "renal", "glomerular",
-      "ckd", "fsgs"],                                         "Nephrology – Other"),
-    (["respiratory", "copd", "pulmonary fibrosis",
-      "ipf", "pulmonary hypertension"],                       "Respiratory – Other"),
-    (["women", "fertility", "reproductive",
-      "endometriosis", "assisted reproductive"],              "Women's Health"),
-    (["rna", "sirna", "mrna", "oligonucleotide",
-      "antisense"],                                           "RNA Therapeutics – Platform"),
+    # Oncology – Lung (most specific first)
+    (["nsclc", "non-small cell lung", "lung cancer", "sclc",
+      "small cell lung", "mesothelioma"],                               "Oncology - Lung"),
+
+    # Oncology – Breast
+    (["breast cancer", "her2", "hr+", "tnbc", "triple negative breast"],
+                                                                        "Oncology - Breast"),
+
+    # Oncology – Hematologic (blood cancers)
+    (["lymphoma", "leukemia", "leukaemia", "myeloma", "myeloid",
+      "cll", "mcl", "aml", "cml", "all", "nhl", "dlbcl",
+      "multiple myeloma", "myelodysplastic"],                           "Oncology - Hematologic"),
+
+    # Oncology – Other (all remaining solid tumors)
+    (["oncology", "cancer", "tumor", "tumour", "carcinoma", "malignancy",
+      "sarcoma", "glioblastoma", "glioma", "gbm", "neuroendocrine",
+      "ovarian", "gastric", "colorectal", "crc", "pdac", "pancreatic",
+      "urothelial", "bladder", "prostate", "renal cell", "hepatocellular",
+      "biliary", "cervical", "endometrial", "head and neck"],           "Oncology - Other"),
+
+    # Dermatology (atopic dermatitis, psoriasis)
+    (["atopic dermatitis", "eczema", "psoriasis", "psoriatic",
+      "dermatitis", "skin"],                                            "Dermatology"),
+
+    # Gastroenterology / Hepatology (IBD, liver)
+    (["inflammatory bowel", "crohn", "ulcerative colitis", "ibd",
+      "mash", "nash", "steatohepatitis", "fatty liver", "masld",
+      "hepatitis", "liver", "gastro", "gi disorder"],                  "Gastroenterology / Hepatology"),
+
+    # Nephrology (kidneys, lupus nephritis)
+    (["nephrology", "kidney", "renal", "glomerular", "ckd", "fsgs",
+      "iga nephropathy", "igan", "lupus nephritis"],                   "Nephrology"),
+
+    # Respiratory
+    (["respiratory", "asthma", "copd", "pulmonary fibrosis", "ipf",
+      "pulmonary hypertension", "rhinosinusitis", "allergic rhinitis"], "Respiratory"),
+
+    # Immunology / Inflammation (remaining autoimmune, general)
+    (["autoimmune", "immunology", "inflammatory", "lupus", "sle",
+      "rheumatoid arthritis", "ankylosing", "food allergy", "csu",
+      "urticaria", "allergi"],                                          "Immunology / Inflammation"),
+
+    # Metabolic
+    (["obesity", "weight loss", "glp-1", "glp1", "diabetes", "t2d",
+      "hba1c", "insulin", "metabolic", "mash", "nash",
+      "cardiometabolic", "dyslipidemia", "cholesterol", "ldl",
+      "triglyceride", "hyperlipidemia"],                                "Metabolic"),
+
+    # Cardiovascular
+    (["cardiovascular", "cardiac", "heart failure", "hypertension",
+      "hcm", "atrial fibrillation", "coronary", "lp(a)", "atherosclerosis"],
+                                                                        "Cardiovascular"),
+
+    # Neurology / CNS
+    (["neurology", "alzheimer", "parkinson", "neurodegeneration",
+      "als", "epilepsy", "multiple sclerosis", "ms", "migraine",
+      "stroke", "cns", "neuropathy", "glioma", "brain"],               "Neurology / CNS"),
+
+    # Psychiatry / Mental Health
+    (["psychiatry", "depression", "schizophrenia", "bipolar",
+      "anxiety", "adhd", "mental health", "ocd"],                      "Psychiatry / Mental Health"),
+
+    # Rare Diseases
+    (["rare disease", "orphan", "ultra-rare", "pompe", "gaucher",
+      "fabry", "wilson", "spinal muscular atrophy", "sma",
+      "duchenne", "phenylketonuria", "pku"],                            "Rare Diseases"),
+
+    # Infectious Diseases
+    (["infectious", "bacterial", "viral", "hiv", "hbv", "hcv",
+      "influenza", "covid", "sars", "tuberculosis", "malaria",
+      "antifungal", "antimicrobial", "antibiotic"],                     "Infectious Diseases"),
+
+    # Vaccines
+    (["vaccine", "vaccination", "immunisation", "immunization",
+      "mrna vaccine", "prophylactic"],                                  "Vaccines"),
+
+    # Ophthalmology
+    (["ophthalmology", "retina", "macular degeneration", "amd",
+      "glaucoma", "ocular", "eye disease"],                             "Ophthalmology"),
+
+    # Endocrinology
+    (["endocrinology", "thyroid", "adrenal", "pituitary",
+      "growth hormone", "hypopituitarism"],                             "Endocrinology (Non-Metabolic)"),
+
+    # Platform / Technology
+    (["platform", "rna platform", "sirna", "mrna", "oligonucleotide",
+      "antisense", "gene editing", "crispr", "discovery platform",
+      "ai platform", "adc platform", "linker tech"],                   "Platform / Technology"),
+
+    # Cell & Gene Therapy (specific modality-level deals)
+    (["cell therapy", "gene therapy", "car-t", "car t", "tcr",
+      "stem cell", "gene correction"],                                  "Cell & Gene Therapy"),
 ]
 
 def _ta_fuzzy(s: str) -> str | None:
@@ -799,6 +932,10 @@ def save_deal(deal_data: dict) -> str:
 
     deal_data["announcement_month_year"] = sanitize_date(
         deal_data.get("announcement_month_year", ""))
+    deal_data["chinese_party"] = normalize_company_name(
+        deal_data.get("chinese_party", ""))
+    deal_data["foreign_party"] = normalize_company_name(
+        deal_data.get("foreign_party", ""))
     deal_data["therapeutic_area"] = normalize_therapeutic_area(
         deal_data.get("therapeutic_area", ""))
     deal_data["territory"]        = normalize_territory(
@@ -986,7 +1123,8 @@ def build_partner_round(existing_deals: list, search_window: str = "") -> str:
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
 def build_system_prompt(existing_deals: list, search_window: str = "",
-                        completed_queries: list = None) -> str:
+                        completed_queries: list = None,
+                        csv_mode: bool = False) -> str:
     # Compact already-saved list — just cp/drug/month, capped at 20 entries
     saved_summary = "\n".join(
         f"{d.get('chinese_party','?')}/{d.get('drug_name') or d.get('asset','?')[:25]}/{d.get('announcement_month_year','?')}"
@@ -995,10 +1133,34 @@ def build_system_prompt(existing_deals: list, search_window: str = "",
 
     window_str = search_window if search_window else "Search all time."
 
-    # Build dynamic company list from live DB
-    company_round  = build_company_list(existing_deals, search_window)
+    # Build dynamic rounds — company round only injected in CSV/targeted mode
     modality_round = build_modality_round(existing_deals, search_window)
     partner_round  = build_partner_round(existing_deals, search_window)
+
+    if csv_mode:
+        company_round = build_company_list(existing_deals, search_window)
+        round2_block  = company_round
+        round2_budget = "- Searches 13-32:  Company-specific — search_web_wide (ROUND 2, targeted)"
+        min_searches  = 15
+        must_complete = "ROUND 1, ROUND 2, and ROUND 7"
+        goal_note     = "TARGETED MODE (--csv): Run company-specific Round 2 to deepen known companies."
+    else:
+        round2_block  = (
+            "ROUND 2 — WIDE DISCOVERY SWEEPS via search_web_wide\n"
+            "Do NOT search by company name. Cast wide to find deals from companies not yet in the DB.\n"
+            f'  "China biotech licensing deal new {window_str}"\n'
+            f'  "China pharma out-licensing agreement {window_str}"\n'
+            f'  "Chinese company global rights deal {window_str}"\n'
+            f'  "China biotech deal announced {window_str}"\n'
+            f'  "China biopharma licensing milestone {window_str}"\n'
+            f'  "China drug licensing rights acquisition {window_str}"\n'
+            f'  "outbound licensing China biotech {window_str}"\n'
+            f'  "China biopharma partnership agreement {window_str}"\n'
+        )
+        round2_budget = "- Searches 13-20:  Wide discovery sweeps — search_web_wide (ROUND 2)"
+        min_searches  = 15
+        must_complete = "ROUND 1, ROUND 2, and ROUND 7"
+        goal_note     = "DISCOVERY MODE: Every round uses wide structural queries — never search by company name."
 
     # Compact query log — tells Claude exactly what it has already searched
     if completed_queries:
@@ -1010,11 +1172,9 @@ def build_system_prompt(existing_deals: list, search_window: str = "",
         query_log = "SEARCHES ALREADY COMPLETED THIS SESSION: none yet — this is the first search."
 
     return f"""You are a senior biopharma deal analyst specializing in China life science transactions.
+{goal_note}
 
-DATABASE: {len(existing_deals)} deals already saved. Do NOT re-save anything already here:
-{saved_summary}
-
-YOUR MISSION: Find NEW deals not listed above and save them using save_deal().
+YOUR MISSION: Find NEW China biopharma deals not already in the database and save them using save_deal().
 SEARCH WINDOW: {window_str}
 
 {query_log}
@@ -1027,12 +1187,12 @@ SEARCH WINDOW: {window_str}
 Do NOT wait. Do NOT skip a deal because some fields are uncertain.
 Use "Not disclosed" for any financial fields you cannot find.
 
-**USE ALL YOUR STEPS.** Do NOT call finish() until you have done AT LEAST 15 searches.
+**USE ALL YOUR STEPS.** Do NOT call finish() until you have done AT LEAST {min_searches} searches.
 You have a generous step budget — use every single step productively.
 Calling finish() early wastes the budget and leaves deals unfound.
 
 **SAVE AFTER EVERY SEARCH.** The only valid pattern is:
-  search → save ALL deals found → search → save ALL deals found → ... (repeat 15+ times) → finish()
+  search → save ALL deals found → search → save ALL deals found → ... (repeat {min_searches}+ times) → finish()
 
 ═══════════════════════════════════════════════════
  DEAL TYPES — save ALL of these structures
@@ -1083,9 +1243,8 @@ TOOL USAGE:
   search_web_cn   → ONLY Round 6 (Mandarin sweeps).
 
 Do NOT hardcode specific company names, partner names, or drug names into queries
-in Rounds 3–7. These rounds use structural and ecosystem searches that work for
-any year. Specific known companies are already covered by the auto-generated
-Round 2 list. Specific named deals belong in --csv mode.
+unless you are in TARGETED MODE (--csv). Every round uses structural queries that
+cast wide and surface companies not yet in the DB.
 
 Work through ALL rounds in order. Keep a mental checklist.
 
@@ -1095,7 +1254,7 @@ ROUND 1 — MONTHLY SWEEPS via search_web_wide (12 searches)
   ... (March through December — one search per month)
 Save ALL deals found before moving to the next month.
 
-{company_round}
+{round2_block}
 
 {modality_round}
 
@@ -1148,8 +1307,8 @@ ROUND 8 — PRIORITY SOURCE CLEANUP via search_web
 Budget = any search tool call. Save calls are free.
 
 - Searches 1-12:   Monthly sweeps — search_web_wide (ROUND 1)
-- Searches 13-32:  Company-specific — search_web_wide (ROUND 2, auto-generated)
-- Searches 33+:    Modality — search_web_wide (ROUND 3, auto-generated)
+{round2_budget}
+- Searches cont.:  Modality — search_web_wide (ROUND 3, auto-generated)
 - Searches cont.:  Partner — search_web_wide (ROUND 4, auto-generated)
 - Searches cont.:  Structure — search_web_wide (ROUND 5)
 - Searches cont.:  Chinese-language — search_web_cn (ROUND 6)
@@ -1159,7 +1318,17 @@ Budget = any search tool call. Save calls are free.
 
 After EACH search call, immediately save_deal() for EVERY deal found.
 
-DO NOT call finish() before completing at least ROUND 1, ROUND 2, and ROUND 7."""
+═══════════════════════════════════════════════════
+ DEALS ALREADY IN DATABASE — DO NOT RE-SAVE THESE
+═══════════════════════════════════════════════════
+Format: chinese_party / drug_or_asset / month_year
+{saved_summary}
+
+The deduplication system uses canonical company names ("Hengrui Pharma" = "Jiangsu Hengrui
+Pharmaceuticals"). If a deal is clearly already present above, skip it — do NOT re-save.
+When in doubt, save anyway — the system will catch true duplicates automatically.
+
+DO NOT call finish() before completing at least {must_complete}."""
 
 # ── Agent Loop ─────────────────────────────────────────────────────────────────
 
@@ -1204,9 +1373,11 @@ def trim_messages(messages: list, keep_first: int = 1, keep_last: int = 6) -> li
     return trimmed
 
 
-def run_agent(goal: str, search_window: str = "", max_steps: int = MAX_STEPS):
+def run_agent(goal: str, search_window: str = "", max_steps: int = MAX_STEPS,
+              csv_mode: bool = False):
     print(f"\n{'='*60}")
     print(f"  CHINA BIOPHARMA DEAL AGENT  v2")
+    print(f"  Mode: {'TARGETED (CSV)' if csv_mode else 'DISCOVERY'}")
     print(f"  Existing deals in DB: {len(db['deals'])}")
     print(f"  Search budget: {max_steps} searches")
     print(f"{'='*60}\n")
@@ -1227,7 +1398,8 @@ def run_agent(goal: str, search_window: str = "", max_steps: int = MAX_STEPS):
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=8192,
-                system=build_system_prompt(db["deals"], search_window, completed_queries),
+                system=build_system_prompt(db["deals"], search_window, completed_queries,
+                                           csv_mode=csv_mode),
                 tools=TOOLS,
                 messages=trimmed_messages
             )
@@ -1242,7 +1414,8 @@ def run_agent(goal: str, search_window: str = "", max_steps: int = MAX_STEPS):
                 response = client.messages.create(
                     model=MODEL,
                     max_tokens=8192,
-                    system=build_system_prompt(db["deals"], search_window, completed_queries),
+                    system=build_system_prompt(db["deals"], search_window, completed_queries,
+                                               csv_mode=csv_mode),
                     tools=TOOLS,
                     messages=trimmed_messages
                 )
@@ -1391,17 +1564,10 @@ def generate_dashboard(db: dict, search_window: str = ""):
     month_counts  = [x[1] for x in months_sorted]
     month_values  = [round(months_val.get(x[0], 0.0), 1) for x in months_sorted]
 
-    # Broad therapeutic area grouping, capped at 9
+    # With the new flat TA_ENUM taxonomy each value is already a chart-friendly
+    # label, so no grouping needed — pass through as-is, cap at 10 by frequency.
     def broad_area(a):
-        a_lower = a.lower()
-        if "oncology"    in a_lower: return "Oncology"
-        if "immunology"  in a_lower: return "Immunology"
-        if "cardio"      in a_lower: return "Cardiovascular"
-        if "metabolic"   in a_lower or "obesity" in a_lower: return "Metabolic"
-        if "respiratory" in a_lower: return "Respiratory"
-        if "cns"         in a_lower or "neuro"   in a_lower: return "CNS / Neurology"
-        if "rare"        in a_lower: return "Rare Disease"
-        return "Other"
+        return a  # new enum is already flat — no sub-grouping required
 
     broad_areas     = {}
     broad_areas_val = {}
@@ -1409,7 +1575,7 @@ def generate_dashboard(db: dict, search_window: str = ""):
         b = broad_area(a)
         broad_areas[b]     = broad_areas.get(b, 0) + areas[a]
         broad_areas_val[b] = broad_areas_val.get(b, 0.0) + areas_val.get(a, 0.0)
-    broad_areas     = dict(sorted(broad_areas.items(), key=lambda x: -x[1])[:9])
+    broad_areas     = dict(sorted(broad_areas.items(), key=lambda x: -x[1])[:10])
     broad_areas_val = {k: round(broad_areas_val.get(k, 0.0), 1) for k in broad_areas}
 
     top_area = max(broad_areas,     key=broad_areas.get)     if broad_areas     else "—"
@@ -1500,6 +1666,23 @@ def generate_dashboard(db: dict, search_window: str = ""):
     set1_js          = json.dumps(SET1)
     area_pal_js      = palette(len(broad_areas))
 
+    # Per-year total deal value KPI tiles (up to 4 most recent years)
+    year_vals = {}
+    for d in deals:
+        parts = d.get("announcement_month_year", "").split()
+        yr = parts[-1] if parts else None
+        if yr and yr.isdigit():
+            year_vals[yr] = year_vals.get(yr, 0.0) + parse_usd_millions(d.get("total_value_usd", ""))
+    year_kpi_html = ""
+    for yr in sorted(year_vals, reverse=True)[:4]:
+        v = year_vals[yr]
+        fmt = f"${v/1000:.1f}B" if v >= 1000 else f"${v:.0f}M"
+        year_kpi_html += (
+            f'<div class="kpi"><div class="kpi-val" style="font-size:1.6rem">{fmt}</div>'
+            f'<div class="kpi-lbl">Total Deal Value {yr}</div>'
+            f'<div class="kpi-sub">disclosed only</div></div>'
+        )
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1528,7 +1711,7 @@ body{{background:var(--bg);color:var(--txt);font-family:var(--mono);font-size:13
 .hdr-meta code{{background:#ffffff0f;padding:2px 7px;border-radius:3px;font-size:11px;color:var(--g)}}
 
 /* KPIs */
-.kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--brd);border-bottom:1px solid var(--brd)}}
+.kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--brd);border-bottom:1px solid var(--brd)}}
 .kpi{{background:var(--surf);padding:16px 24px;position:relative;overflow:hidden}}
 .kpi::after{{content:'';position:absolute;bottom:0;left:0;right:0;height:2px}}
 .kpi:nth-child(1)::after{{background:var(--r)}}
@@ -1640,9 +1823,7 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 <!-- KPIs -->
 <div class="kpis">
   <div class="kpi"><div class="kpi-val">{total}</div><div class="kpi-lbl">Total Deals</div><div class="kpi-sub">in database</div></div>
-  <div class="kpi"><div class="kpi-val" style="font-size:1.1rem">{top_area}</div><div class="kpi-lbl">Top Therapeutic Area</div><div class="kpi-sub">{broad_areas.get(top_area,0)} deals</div></div>
-  <div class="kpi"><div class="kpi-val" style="font-size:1.1rem">{top_type}</div><div class="kpi-lbl">Most Common Deal Type</div><div class="kpi-sub">{types.get(top_type,0)} deals</div></div>
-  <div class="kpi"><div class="kpi-val" style="font-size:.9rem">{top_cp}</div><div class="kpi-lbl">Most Active Chinese Party</div><div class="kpi-sub">{chinese_parties.get(top_cp,0)} deals</div></div>
+  {year_kpi_html}
 </div>
 
 <!-- Chart mode toggle -->
@@ -1707,8 +1888,8 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
     <colgroup>
       <col style="width:110px">
       <col style="width:155px">
-      <col style="width:145px">
-      <col style="width:215px">  <!-- asset -->
+      <col style="width:100px">
+      <col style="width:300px">  <!-- asset -->
       <col style="width:110px">  <!-- drug name -->
       <col style="width:155px">  <!-- therapeutic area -->
       <col style="width:120px">
@@ -1716,7 +1897,7 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
       <col style="width:130px">
       <col style="width:90px">
       <col style="width:80px">
-      <col style="width:125px">
+      <col style="width:100px">
       <col style="width:135px">
       <col style="width:480px">
     </colgroup>
@@ -1793,6 +1974,15 @@ const DATA = {{
 const CHARTS = {{}};
 
 function makeBarChart(id, w, h, labels, data, colors, indexAxis='y', xStepSize=null) {{
+  // When indexAxis='x' the x-axis is the CATEGORY axis (shows labels like "24/03").
+  // When indexAxis='y' the x-axis is the VALUE axis (shows numbers/dollars).
+  const xIsCategory = indexAxis === 'x';
+  const yIsCategory = indexAxis === 'y';
+
+  const valueAxisCallback = v => currentMode === 'value'
+    ? (v >= 1000 ? '$' + (v/1000).toFixed(0) + 'B' : '$' + v + 'M')
+    : v;
+
   const opts = {{
     responsive: false, maintainAspectRatio: false,
     indexAxis,
@@ -1800,7 +1990,7 @@ function makeBarChart(id, w, h, labels, data, colors, indexAxis='y', xStepSize=n
       tooltip: {{
         callbacks: {{
           label: ctx => {{
-            const v = ctx.parsed[indexAxis === 'y' ? 'x' : 'y'];
+            const v = ctx.parsed[yIsCategory ? 'x' : 'y'];
             return currentMode === 'value'
               ? ` ${{v >= 1000 ? (v/1000).toFixed(1)+'B' : v+'M'}}`
               : ` ${{v}} deal${{v===1?'':'s'}}`;
@@ -1810,23 +2000,20 @@ function makeBarChart(id, w, h, labels, data, colors, indexAxis='y', xStepSize=n
     }},
     scales: {{
       x: {{
-        ticks: {{ color:tc, font:{{size:10}},
-          ...(indexAxis==='x' ? {{maxRotation:45,minRotation:30}} : {{stepSize: xStepSize||1}}),
-          callback: v => currentMode==='value'
-            ? (v>=1000 ? '$'+(v/1000).toFixed(0)+'B' : '$'+v+'M')
-            : v
+        ticks: {{ color: xIsCategory ? '#dde3ee' : tc, font:{{size:10}},
+          ...(xIsCategory
+            ? {{maxRotation:45, minRotation:30}}          // category: rotate labels, no callback
+            : {{stepSize: xStepSize||1, callback: valueAxisCallback}})  // value: format numbers
         }},
-        grid: {{color:gc}}
+        grid: {{color: xIsCategory ? 'transparent' : gc}}
       }},
       y: {{
-        ticks: {{ color: indexAxis==='y' ? '#dde3ee' : tc, font:{{size: indexAxis==='y' ? 11 : 10}},
-          ...(indexAxis==='x' ? {{stepSize: xStepSize||1,
-            callback: v => currentMode==='value'
-              ? (v>=1000 ? '$'+(v/1000).toFixed(0)+'B' : '$'+v+'M')
-              : v
-          }} : {{}})
+        ticks: {{ color: yIsCategory ? '#dde3ee' : tc, font:{{size: yIsCategory ? 11 : 10}},
+          ...(yIsCategory
+            ? {{}}                                         // category: no callback
+            : {{stepSize: xStepSize||1, callback: valueAxisCallback}})  // value: format numbers
         }},
-        grid: {{color: indexAxis==='y' ? 'transparent' : gc}}
+        grid: {{color: yIsCategory ? 'transparent' : gc}}
       }}
     }}
   }};
@@ -1901,6 +2088,10 @@ function srt(c) {{
   }});
   rows.forEach(r => tb.appendChild(r));
 }}
+
+// Default: sort by date descending (newest first)
+// Pre-set sd[0]=true so the first srt(0) call sorts descending
+sd[0] = true; srt(0);
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
 const DEALS_DATA = {json.dumps([{
@@ -2403,154 +2594,610 @@ def _build_fallback_deal(row: dict) -> dict:
     }
 
 
+# ── Targeted string/URL mode ───────────────────────────────────────────────────
+
+def _run_targeted_string(text_or_url: str, max_searches: int = 3):
+    """
+    Targeted mode for a free-text string or URL describing a single deal.
+    Runs a mini-agent loop: query the string/URL, fill in all fields, save once.
+    Strategy:
+      a) Direct query on the provided text/URL
+      b) Broad fallback: extracted company + asset terms
+      c) Mandarin fallback via search_web_cn if Chinese company detected
+    """
+    all_saved = "\n".join(
+        f"{d.get('chinese_party','?')}/{d.get('drug_name') or d.get('asset','?')[:25]}/{d.get('announcement_month_year','?')}"
+        for d in db["deals"][-30:]
+    ) or "None yet."
+
+    system = f"""You are a senior biopharma deal analyst. Your task is to find and save ONE specific deal.
+
+INPUT PROVIDED:
+{text_or_url}
+
+YOUR TASK:
+1. If the input is a URL, fetch or search for its content first.
+2. Build a search query from the key entities in the input:
+     - If you can identify a Chinese company + partner + asset: tight query combining all three + year
+     - If less information: broad query on company names + deal terms
+3. After at most {max_searches} searches, call save_deal() with the best data you found.
+   - Prefer article data over the raw input string where they differ.
+   - Mark any unknown fields "Not disclosed". Do NOT invent facts.
+4. Call finish() immediately after saving (or after confirming it's a duplicate).
+
+Search strategy:
+  a) Tight: "[chinese_company] [partner] [asset] deal [year]"
+  b) Broad fallback: "[chinese_company] licensing deal [year]"
+  c) Mandarin fallback via search_web_cn: "[中文公司名] 授权 [year]"
+
+FIELD GUIDE:
+- announcement_month_year: "Month YYYY"
+- deal_type: {_pipe(DEAL_TYPE_ENUM)}
+- chinese_party, foreign_party, asset, drug_name, modality, therapeutic_area, stage
+- total_value_usd / upfront_usd: "$1.2B" / "$300M" / "Not Disclosed"
+- territory: {_pipe_wrap(TERRITORY_ENUM)}
+- highlights: ONE sentence — most notable fact
+- source_url / source_name
+
+DEALS ALREADY IN DATABASE — DO NOT RE-SAVE:
+{all_saved}
+
+CRITICAL: Save exactly once, then finish(). Do NOT save unrelated deals found while searching."""
+
+    messages  = [{"role": "user", "content": f"Find and save this deal:\n{text_or_url}"}]
+    searches  = 0
+    done      = False
+    saved     = False
+
+    while searches < max_searches and not done:
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=system,
+                tools=TOOLS,
+                messages=messages
+            )
+        except anthropic.RateLimitError:
+            import time
+            print("  [Rate limit — waiting 60s]")
+            time.sleep(62)
+            continue
+        except anthropic.APIError as e:
+            print(f"  [API error: {e}]")
+            break
+
+        messages.append({"role": "assistant", "content": response.content})
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        if not tool_blocks:
+            print("  [No tool calls — done]")
+            break
+
+        tool_results = []
+        for block in tool_blocks:
+            print(f"  -> {block.name}({str(block.input)[:120]}...)")
+            try:
+                result = run_tool(block.name, block.input)
+            except Exception as e:
+                result = f"Tool error: {e}"
+            print(f"  <- {str(result)[:160]}")
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": str(result)
+            })
+            if block.name in ("search_web", "search_web_cn", "search_web_wide"):
+                searches += 1
+            if block.name == "save_deal":
+                saved = True
+            if block.name == "finish":
+                done = True
+
+        messages.append({"role": "user", "content": tool_results})
+
+    if not saved:
+        print(f"  [No deal saved after {searches} searches — cannot build fallback without CSV row]")
+        print(f"  Try providing more detail in your string, or use -t with a CSV file.")
+
+    save_database(db, mark_run=True)
+
+
+# ── Run Log ────────────────────────────────────────────────────────────────────
+
+RUN_LOG_PATH = Path("run_log.jsonl")   # one JSON object per line, one per run
+
+def append_run_log(entry: dict):
+    """Append one run record to the persistent JSONL run log."""
+    with open(RUN_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+def print_run_log(tail: int = 10):
+    """Print the last `tail` entries from the run log."""
+    if not RUN_LOG_PATH.exists():
+        print("  No run log yet.")
+        return
+    lines = RUN_LOG_PATH.read_text(encoding="utf-8").strip().splitlines()
+    entries = [json.loads(l) for l in lines if l.strip()]
+    print(f"\n  Run log — last {min(tail, len(entries))} of {len(entries)} runs:")
+    for e in entries[-tail:]:
+        mode  = e.get("mode", "?")
+        ts    = e.get("timestamp", "?")
+        win   = e.get("window", "?")
+        added = e.get("deals_added", "?")
+        total = e.get("deals_total", "?")
+        src   = e.get("source", "")
+        src_s = f"  source={src}" if src else ""
+        print(f"  {ts}  [{mode}]  window={win}  +{added} deals  total={total}{src_s}")
+
+
 # ── Entry Point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+
+    # ── Argument parser ───────────────────────────────────────────────────────
     parser = argparse.ArgumentParser(
         description="China Biopharma Deal Research Agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python biopharma_agent.py              # auto window: search from last run date
-  python biopharma_agent.py -r 2025      # search only 2025 deals
-  python biopharma_agent.py -r 2024 2025 # search 2024 and 2025 deals
-  python biopharma_agent.py -n           # skip search, regenerate dashboard only
-  python biopharma_agent.py --csv deals.csv          # import from CSV (3 searches/row)
-  python biopharma_agent.py --csv deals.csv --csv-searches 5  # more searches per row
+  python biopharma_agent.py target deals.csv
+  python biopharma_agent.py target deals.csv -s 5
+  python biopharma_agent.py target "Hengrui licensed SHR-4849 to Ideaya for $1.2B"
+  python biopharma_agent.py target "https://fiercebiotech.com/..."
+
+  python biopharma_agent.py discover
+  python biopharma_agent.py discover -w 2025
+  python biopharma_agent.py discover -w 2025-Q1
+  python biopharma_agent.py discover -w 2024-Q3 2024-Q4
+  python biopharma_agent.py discover -w 2025 --steps 80
+
+  python biopharma_agent.py --log
+  python biopharma_agent.py discover -n
         """
     )
     parser.add_argument(
-        "-n", "--no-query",
+        "--log",
         action="store_true",
-        help="Skip the agent search — only regenerate dashboard.html from existing database"
+        help="Print the persistent run log and exit."
     )
-    parser.add_argument(
-        "-s", "--steps",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Number of searches to perform (default: 60). Use -s 20 for a quick run, -s 46 for full coverage."
+
+    subparsers = parser.add_subparsers(dest="mode", metavar="MODE")
+
+    # ── target subcommand ─────────────────────────────────────────────────────
+    p_target = subparsers.add_parser(
+        "target",
+        help="Targeted mode: find one specific deal (string/URL) or process a CSV batch.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+TARGETED MODE — find and save one or more specific deals.
+
+Provide either a CSV file (one deal per row) or a free-text string / URL.
+
+Strategy per deal:
+  1. Tight query: chinese_party + foreign_party + asset + year
+  2. Broad fallback: company names + year
+  3. Mandarin fallback via search_web_cn
+  4. If CSV: save from CSV fields as-is. If string: report failure.
+        """
     )
-    parser.add_argument(
-        "-r", "--range",
-        nargs="+",
-        metavar="YEAR",
-        help="Override search window with explicit year(s), e.g. -r 2025 or -r 2024 2025"
+    p_target.add_argument(
+        "input",
+        metavar="CSV_OR_STRING",
+        help="Path to a CSV file, or a free-text string / URL describing a single deal."
     )
-    parser.add_argument(
-        "--csv",
-        metavar="FILE",
-        help=(
-            "CSV import mode: look up each row as a specific deal and save to database. "
-            "CSV must have a header row. Recognised columns (case-insensitive): "
-            "'Chinese Party', 'Counterparty'/'Foreign Party', 'Lead Asset'/'Drug Name', "
-            "'Stage', 'Ann. Date'/'Date', 'Upfront (USD)', 'Milestones / Total'. "
-            "Any extra columns are passed as search hints. "
-            "Example: python biopharma_agent.py --csv nature_deals.csv"
-        )
-    )
-    parser.add_argument(
-        "--csv-searches",
+    p_target.add_argument(
+        "-s", "--searches",
         type=int,
         default=3,
         metavar="N",
-        help="Max web searches per CSV row (default: 3). Increase for harder-to-find deals."
+        help="Max web searches per deal (default: 3)."
     )
+    p_target.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Override total step budget (default: {MAX_STEPS})."
+    )
+
+    # ── discover subcommand ───────────────────────────────────────────────────
+    p_discover = subparsers.add_parser(
+        "discover",
+        help="Discovery mode: wide sweep for all China biopharma deals in a time window.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+DISCOVERY MODE — wide sweep for all China biopharma deals in a time window.
+
+If no window is given, the window is auto-computed as: today → one month before
+the latest deal already in the database (1-month overlap to catch stragglers).
+On an empty database, defaults to a full 2024–2025 sweep.
+
+Window format:  YYYY  or  YYYY-Q1 / YYYY-Q2 / YYYY-Q3 / YYYY-Q4
+
+Strategy order:
+  R1. Monthly sweeps                                  (search_web_wide)
+  R2. Wide structural discovery — no company names    (search_web_wide)
+  R3. Modality sweeps (ADC, bispecific, GLP-1 …)     (search_web_wide)
+  R4. Trusted English sources                         (search_web)
+  R5. Chinese trusted sources (医药魔方, 药渡 …)       (search_web_cn)
+  R6. Company-name sweeps — window-gated              (search_web_wide)
+  R7. Geography & VC ecosystem                        (search_web_wide)
+  R8. Deal-structure sweeps                           (search_web_wide)
+        """
+    )
+    p_discover.add_argument(
+        "-w", "--window",
+        nargs="+",
+        metavar="PERIOD",
+        help="Time window: e.g. -w 2025  or  -w 2025-Q1  or  -w 2024-Q3 2024-Q4. "
+             "Omit for auto window."
+    )
+    p_discover.add_argument(
+        "-n", "--no-query",
+        action="store_true",
+        help="Skip the agent search — only regenerate dashboard and CSV from existing database."
+    )
+    p_discover.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Override search step budget (default: {MAX_STEPS})."
+    )
+
     args = parser.parse_args()
 
-    max_steps = args.steps if args.steps is not None else MAX_STEPS
-    if args.steps is not None:
-        print(f"\n  [-s] Step budget overridden: {max_steps} steps")
+    # ── --log: just print history and exit ───────────────────────────────────
+    if args.log:
+        print_run_log(tail=20)
+        import sys; sys.exit(0)
 
-    db = load_database()
+    # ── No mode given: print help ─────────────────────────────────────────────
+    if args.mode is None:
+        parser.print_help()
+        import sys; sys.exit(0)
 
-    # ── CSV import mode ───────────────────────────────────────────────────────
-    if args.csv:
-        csv_file = args.csv
-        if not Path(csv_file).exists():
-            print(f"\n  [ERROR] CSV file not found: {csv_file}")
-            import sys; sys.exit(1)
-        run_csv_import(csv_file, max_searches_per_row=args.csv_searches)
-        # Regenerate outputs after import
+    db           = load_database()
+    deals_before = len(db["deals"])
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  MODE 1 — TARGETED
+    # ═════════════════════════════════════════════════════════════════════════
+    if args.mode == "target":
+        target_arg = args.input
+        is_csv     = target_arg.endswith(".csv") or (Path(target_arg).exists() and "," in Path(target_arg).read_text()[:200])
+        n_searches = args.searches
+        max_steps  = args.steps if args.steps is not None else MAX_STEPS
+        if args.steps is not None:
+            print(f"\n  [--steps] Step budget overridden: {max_steps}")
+
+        print(f"\n{'='*60}")
+        print(f"  MODE: TARGETED")
+        if is_csv:
+            print(f"  Source: CSV file  →  {target_arg}")
+        else:
+            print(f"  Source: free-text string / URL")
+            print(f"  Input:  {target_arg[:120]}")
+        print(f"  Searches per deal: {n_searches}")
+        print(f"  Existing deals in DB: {deals_before}")
+        print(f"{'='*60}")
+        print()
+        print("  Route taken:")
+        print("    [1] Targeted mode selected via -t / --target flag")
+        if is_csv:
+            print("    [2] Input is a CSV file — will process one deal per row")
+            print("    [3] Per-row strategy:")
+            print("         a) Tight query: chinese_party + foreign_party + asset + year")
+            print("         b) Broad fallback: company names + year")
+            print("         c) Mandarin fallback via search_web_cn")
+            print("         d) If all fail: save from CSV fields as-is")
+        else:
+            print("    [2] Input is a string/URL — will find and save one deal")
+            print("    [3] Strategy:")
+            print("         a) Query directly on the string/URL content")
+            print("         b) Broad fallback with extracted company/asset names")
+            print("         c) Mandarin fallback if company is Chinese")
+
+        if is_csv:
+            if not Path(target_arg).exists():
+                print(f"\n  [ERROR] CSV file not found: {target_arg}")
+                import sys; sys.exit(1)
+            run_csv_import(target_arg, max_searches_per_row=n_searches)
+            window_label = f"CSV: {Path(target_arg).name}"
+            source_label = target_arg
+        else:
+            window_label = "Targeted (string)"
+            source_label = target_arg[:80]
+            _run_targeted_string(target_arg, max_searches=n_searches)
+
         db = load_database()
-        generate_dashboard(db, f"CSV import: {Path(csv_file).name}")
+        deals_added = len(db["deals"]) - deals_before
+        generate_dashboard(db, window_label)
         generate_csv(db)
+
+        log_entry = {
+            "timestamp":    datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mode":         "targeted",
+            "window":       window_label,
+            "source":       source_label,
+            "deals_added":  deals_added,
+            "deals_total":  len(db["deals"]),
+            "steps_used":   n_searches,
+        }
+        append_run_log(log_entry)
+
         print(f"\n  Open dashboard : {DASHBOARD_PATH.resolve()}")
         print(f"  Raw data       : {DB_PATH.resolve()}")
+        print(f"  Run log        : {RUN_LOG_PATH.resolve()}")
+        print(f"  Deals added    : {deals_added}")
         print(f"  Deals in DB    : {len(db['deals'])}\n")
         import sys; sys.exit(0)
 
-    # ── Determine search window ───────────────────────────────────────────────
-    db = load_database()
-    last_run = db.get("last_run_date")   # e.g. "2025-07-15" or None
+    # ═════════════════════════════════════════════════════════════════════════
+    #  MODE 2 — DISCOVERY
+    # ═════════════════════════════════════════════════════════════════════════
 
-    if args.range:
-        # User explicitly specified years, e.g. -r 2024 2025
-        years = sorted(set(args.range))
-        if len(years) == 1:
-            search_window = f"Only find deals announced in {years[0]}."
-            window_label  = years[0]
+    max_steps = args.steps if args.steps is not None else MAX_STEPS
+    if args.steps is not None:
+        print(f"\n  [--steps] Search budget overridden: {max_steps}")
+
+    # ── Parse window argument ─────────────────────────────────────────────────
+    QUARTER_MONTHS = {"Q1": (1, 3), "Q2": (4, 6), "Q3": (7, 9), "Q4": (10, 12)}
+    MONTH_NAMES_LIST = [
+        "January","February","March","April","May","June",
+        "July","August","September","October","November","December"
+    ]
+
+    def _parse_period(tok: str):
+        """Parse '2025', '2025-Q1' into (year:int, q_start_month:int, q_end_month:int)."""
+        tok = tok.strip().upper()
+        m = re.fullmatch(r"(20\d{2})", tok)
+        if m:
+            return int(m.group(1)), 1, 12
+        m = re.fullmatch(r"(20\d{2})[-_]?(Q[1-4])", tok)
+        if m:
+            yr = int(m.group(1))
+            qs, qe = QUARTER_MONTHS[m.group(2)]
+            return yr, qs, qe
+        raise ValueError(f"Cannot parse period '{tok}'. Use YYYY or YYYY-Q1..Q4.")
+
+    if args.window:
+        # User-specified window: one or more YYYY / YYYY-Qn tokens
+        periods = []
+        for tok in args.window:
+            try:
+                periods.append(_parse_period(tok))
+            except ValueError as e:
+                print(f"\n  [ERROR] {e}")
+                import sys; sys.exit(1)
+
+        # Merge into a single from→to range
+        min_yr  = min(p[0] for p in periods)
+        max_yr  = max(p[0] for p in periods)
+        from_mo = MONTH_NAMES_LIST[min(p[1] for p in periods) - 1]
+        to_mo   = MONTH_NAMES_LIST[max(p[2] for p in periods) - 1]
+        window_label = " + ".join(args.window)
+
+        if min_yr == max_yr and min(p[1] for p in periods) == 1 and max(p[2] for p in periods) == 12:
+            search_window = f"Only find deals announced in {min_yr}."
+        elif min_yr == max_yr:
+            search_window = (
+                f"Only find deals announced between {from_mo} {min_yr} and {to_mo} {max_yr}. "
+                f"Do NOT save deals outside this window."
+            )
         else:
-            year_list = ", ".join(years[:-1]) + f" and {years[-1]}"
-            search_window = f"Only find deals announced in {year_list}."
-            window_label  = " & ".join(years)
-        print(f"\n  [-r] Manual search window: {year_list if len(years) > 1 else years[0]}")
+            search_window = (
+                f"Only find deals announced between {from_mo} {min_yr} and {to_mo} {max_yr}. "
+                f"Do NOT save deals outside this window."
+            )
 
-    elif last_run:
-        # Auto: search from the day after last run
-        from datetime import date, timedelta
-        last_dt   = datetime.strptime(last_run, "%Y-%m-%d").date()
-        since     = (last_dt + timedelta(days=1)).strftime("%B %-d, %Y")
-        since_yr  = (last_dt + timedelta(days=1)).strftime("%Y")
-        search_window = (
-            f"Only find deals announced on or after {since} "
-            f"(your database was last updated on {last_run}). "
-            f"Do NOT waste searches on deals from before {since}."
-        )
-        window_label = f"Since {last_run}"
-        print(f"\n  [Auto window] Searching for deals since last run: {last_run}")
+        print(f"\n  Route taken:")
+        print(f"    [1] Discovery mode — window explicitly provided via -w")
+        print(f"    [2] Parsed window:  {window_label}  →  {from_mo} {min_yr} – {to_mo} {max_yr}")
 
     else:
-        # First run ever — no restriction
-        search_window = "This is the first run. Search broadly across 2024 and 2025."
-        window_label  = "All time (first run)"
-        print("\n  [First run] No prior run date — searching all of 2024–2025")
+        # Auto window: today → one month before the latest deal in DB
+        today     = datetime.now()
+        today_str = today.strftime("%B %-d, %Y")
 
-    # Build a year-aware goal that names the target years explicitly
-    if args.range:
-        year_mention = " and ".join(sorted(set(args.range)))
-        goal_window  = f"Focus specifically on {year_mention}."
-    else:
-        goal_window = "Cover 2024 and 2025 comprehensively."
+        # Find the latest deal date in DB
+        latest_mo_yr = None
+        for d in db["deals"]:
+            raw = d.get("announcement_month_year", "")
+            parts = raw.split()
+            if len(parts) == 2 and parts[0] in MONTH_NAMES and parts[1].isdigit():
+                try:
+                    dt = datetime.strptime(raw, "%B %Y")
+                    if latest_mo_yr is None or dt > latest_mo_yr:
+                        latest_mo_yr = dt
+                except ValueError:
+                    pass
 
-    RESEARCH_GOAL = (
-        f"Comprehensively research ALL biopharma deals involving Chinese biotech or pharma companies. "
-        f"{goal_window} "
-        f"You MUST run at least 15 varied searches before finishing — "
-        f"monthly sweeps first, then company-specific, then modality, then partner-focused. "
-        f"There are 90-100 China deals per year — do not stop until you have exhausted the search strategy. "
-        f"Prioritize: FierceBiotech, Endpoints News, BioPharma Dive, Reuters, STAT News."
-    )
+        if latest_mo_yr:
+            # One month before the latest deal
+            if latest_mo_yr.month == 1:
+                cutoff = datetime(latest_mo_yr.year - 1, 12, 1)
+            else:
+                cutoff = datetime(latest_mo_yr.year, latest_mo_yr.month - 1, 1)
+            cutoff_str   = cutoff.strftime("%B %Y")
+            window_label = f"Auto: {cutoff_str} – {today.strftime('%B %Y')}"
+            search_window = (
+                f"Only find deals announced between {cutoff_str} and {today_str}. "
+                f"The latest deal in the database is from {latest_mo_yr.strftime('%B %Y')}. "
+                f"Overlap one month before that to catch anything missed. "
+                f"Do NOT save deals from before {cutoff_str}."
+            )
+            print(f"\n  Route taken:")
+            print(f"    [1] Discovery mode — no -w flag, using auto window")
+            print(f"    [2] Latest deal in DB: {latest_mo_yr.strftime('%B %Y')}")
+            print(f"    [3] Auto window: {cutoff_str} → {today_str} (1 month overlap)")
+        else:
+            # Empty DB — full historical sweep
+            window_label  = "First run (no DB deals)"
+            search_window = "This is the first run — DB is empty. Search broadly across 2024 and 2025."
+            print(f"\n  Route taken:")
+            print(f"    [1] Discovery mode — no -w flag")
+            print(f"    [2] DB is empty — falling back to full 2024–2025 sweep")
 
+    print(f"    [4] Strategy order:")
+    print(f"         R1. Monthly sweeps                         (search_web_wide)")
+    print(f"         R2. Wide structural discovery              (search_web_wide)")
+    print(f"         R3. Modality sweeps                        (search_web_wide)")
+    print(f"         R4. Trusted English sources (FierceBiotech, Endpoints…) (search_web)")
+    print(f"         R5. Chinese trusted sources (医药魔方, 药渡…)           (search_web_cn)")
+    print(f"         R6. Company-name sweeps (active players, right window)  (search_web_wide)")
+    print(f"         R7. Geography & VC ecosystem               (search_web_wide)")
+    print(f"         R8. Deal-structure sweeps                  (search_web_wide)")
+    print()
+
+    # Build discovery system prompt with updated round order
+    def _build_discovery_prompt_rounds(window_str: str, existing_deals: list) -> str:
+        """Returns the strategy block injected into the discovery system prompt."""
+        modality_round = build_modality_round(existing_deals, window_str)
+        partner_round  = build_partner_round(existing_deals, window_str)
+        company_round  = build_company_list(existing_deals, window_str)
+
+        return f"""TOOL USAGE:
+  search_web_wide → R1, R2, R3, R6, R7, R8 — open web, no domain filter
+  search_web      → R4 only — priority English sources (domain-restricted)
+  search_web_cn   → R5 only — Chinese-language sources
+
+Work ALL rounds in order. Keep a mental checklist.
+
+R1 — MONTHLY SWEEPS  (search_web_wide, 12 searches)
+  One search per month in the window. Saves ALL deals before next month.
+  "China biopharma licensing deal January {window_str}"
+  "China biopharma licensing deal February {window_str}"
+  ... (continue through all months in window)
+
+R2 — WIDE STRUCTURAL DISCOVERY  (search_web_wide, ~8 searches)
+  No company names. Structural queries only — surface companies not yet in DB.
+  "China biotech licensing deal new {window_str}"
+  "China pharma out-licensing agreement {window_str}"
+  "Chinese company global rights deal {window_str}"
+  "China biopharma licensing milestone {window_str}"
+  "China drug licensing rights acquisition {window_str}"
+  "outbound licensing China biotech {window_str}"
+  "China biopharma partnership agreement signed {window_str}"
+  "China biotech deal announced {window_str}"
+
+{modality_round}
+
+R4 — TRUSTED ENGLISH SOURCES  (search_web, ~5 searches)
+  Restrict to highest-quality English outlets for deals missed by open search.
+  "China biopharma licensing {window_str} site:fiercebiotech.com"
+  "China licensing {window_str} site:endpointsnews.com"
+  "China biotech deal {window_str} site:biopharmadive.com"
+  "China licensing {window_str} site:reuters.com"
+  "China biotech {window_str} site:statnews.com"
+
+R5 — CHINESE TRUSTED SOURCES  (search_web_cn, ~8 searches)
+  Mandarin pattern queries — no specific company or partner names.
+  "中国生物技术 对外授权 {window_str}"            (China biotech outbound licensing)
+  "医药 license-out 授权交易 {window_str}"        (pharma license-out deals)
+  "中国创新药 BD交易 {window_str}"                (China innovative drug BD deals)
+  "生物科技公司 跨境授权 {window_str}"             (biotech cross-border licensing)
+  "新药授权 里程碑付款 {window_str}"               (new drug licensing milestone payments)
+  "肿瘤 抗体 授权合作 {window_str}"               (oncology antibody licensing)
+  "ADC 授权 {window_str}"                        (ADC licensing)
+  "代谢病 授权 {window_str}"                     (metabolic disease licensing)
+
+{company_round.replace("ROUND 2", "R6")}
+IMPORTANT for R6: Only search companies if the deal would fall within the window: {window_str}
+Do NOT save deals outside the window even if you find them while searching company names.
+
+R7 — GEOGRAPHY & ECOSYSTEM  (search_web_wide, ~9 searches)
+  "Shanghai biotech licensing deal {window_str}"
+  "Suzhou biotech licensing {window_str}"
+  "Beijing biopharmaceutical deal {window_str}"
+  "Hangzhou biotech licensing {window_str}"
+  "Guangzhou Shenzhen biotech deal {window_str}"
+  "OrbiMed China portfolio licensing {window_str}"
+  "6 Dimensions Capital biotech deal {window_str}"
+  "Lilly Asia Ventures portfolio licensing {window_str}"
+  "Hillhouse biotech licensing deal {window_str}"
+  Set chinese_hq = "Yes" for all companies found here.
+
+R8 — DEAL STRUCTURE SWEEPS  (search_web_wide, ~4 searches)
+  "China biotech NewCo spinout deal {window_str}"
+  "China biopharma option agreement licensing {window_str}"
+  "China biotech co-development agreement {window_str}"
+  "China biopharma preclinical deal {window_str}"
+
+═══════════════════════════════════════════════════
+ SEARCH BUDGET REMINDER
+═══════════════════════════════════════════════════
+Budget = any search call. Save calls are free.
+R1: 12  |  R2: 8  |  R3: ~8  |  R4: 5  |  R5: 8  |  R6: varies  |  R7: 9  |  R8: 4
+Total target: ~55–65 searches for a full run.
+
+DO NOT call finish() before completing at least R1, R2, R4, R5, and R7."""
+
+    # ── -n: skip search, just rebuild dashboard ───────────────────────────────
     if args.no_query:
-        print("\n  [-n] Skipping search — regenerating dashboard from existing database...")
-        search_window = db.get("last_search_window", search_window)
+        print("  [-n] Skipping search — regenerating dashboard from existing database...")
+        window_label = db.get("last_search_window", window_label)
     else:
-        # Persist the current search window so -n can re-display it
         db["last_search_window"] = window_label
         save_database(db)
+
+        RESEARCH_GOAL = (
+            f"Comprehensively research ALL biopharma deals involving Chinese biotech/pharma companies. "
+            f"Search window: {search_window} "
+            f"You MUST run at least 15 varied searches before finishing. "
+            f"There are 90–100 China deals per year — do not stop until all 8 rounds are exhausted. "
+            f"Prioritize discovery of companies NOT yet in the database."
+        )
+
+        # Monkey-patch build_system_prompt to inject discovery rounds
+        _orig_build = build_system_prompt
+        def _discovery_system_prompt(existing_deals, sw, completed_queries=None, csv_mode=False):
+            base = _orig_build(existing_deals, sw, completed_queries, csv_mode=False)
+            # Replace the strategy block with our discovery-ordered rounds
+            strategy = _build_discovery_prompt_rounds(sw, existing_deals)
+            # Splice in after SEARCH STRATEGY header
+            marker = "TOOL USAGE:"
+            if marker in base:
+                pre, _, post = base.partition(marker)
+                # Find end of old strategy (before SEARCH BUDGET REMINDER)
+                budget_marker = "═══════════════════════════════════════════════════\n SEARCH BUDGET REMINDER"
+                if budget_marker in post:
+                    _, _, budget_post = post.partition(budget_marker)
+                    return pre + strategy + "\n" + "═"*51 + "\n SEARCH BUDGET REMINDER" + budget_post
+            return base
+
         try:
-            run_agent(RESEARCH_GOAL, search_window, max_steps=max_steps)
+            run_agent(
+                RESEARCH_GOAL,
+                search_window,
+                max_steps=max_steps,
+                csv_mode=False
+            )
         except KeyboardInterrupt:
             print("\n  [Interrupted by user]")
         except Exception as e:
             print(f"\n  [Unexpected error: {e}]")
             print("  Saving dashboard with whatever was collected...")
 
-    # Always regenerate dashboard
     db = load_database()
-    generate_dashboard(db, window_label if not args.no_query else db.get("last_search_window", "—"))
+    deals_added = len(db["deals"]) - deals_before
+    generate_dashboard(db, window_label)
     generate_csv(db)
+
+    if not args.no_query:
+        log_entry = {
+            "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mode":        "discovery",
+            "window":      window_label,
+            "source":      "",
+            "deals_added": deals_added,
+            "deals_total": len(db["deals"]),
+            "steps_used":  max_steps,
+        }
+        append_run_log(log_entry)
+
     print(f"\n  Open dashboard : {DASHBOARD_PATH.resolve()}")
     print(f"  Raw data       : {DB_PATH.resolve()}")
+    print(f"  Run log        : {RUN_LOG_PATH.resolve()}")
+    print(f"  Deals added    : {deals_added}")
     print(f"  Deals in DB    : {len(db['deals'])}\n")
