@@ -1559,6 +1559,18 @@ def generate_dashboard(db: dict, search_window: str = ""):
             pass
         return label
 
+    def date_sort_key(label):
+        """Convert 'Month YYYY' -> integer YYYYMM, e.g. 'March 2024' -> 202403."""
+        try:
+            parts = label.strip().split()
+            if len(parts) == 2:
+                mn, yr = parts
+                mi = MONTH_ORDER.index(mn) + 1 if mn in MONTH_ORDER else 0
+                return int(yr) * 100 + mi
+        except (ValueError, IndexError):
+            pass
+        return 0
+
     months_sorted = sorted(months_raw.items(), key=lambda x: month_sort_key(x[0]))
     month_labels  = [fmt_date(x[0]) for x in months_sorted]
     month_counts  = [x[1] for x in months_sorted]
@@ -1625,7 +1637,12 @@ def generate_dashboard(db: dict, search_window: str = ""):
     # Table rows
     rows = "".join(
         f'<tr class="dr" data-type="{esc_html(d.get("deal_type",""))}" '
-        f'data-area="{esc_html(d.get("therapeutic_area",""))}" data-idx="{i}" style="cursor:default">'
+        f'data-area="{esc_html(d.get("therapeutic_area",""))}" data-idx="{i}" '
+        f'data-id="{esc_html(d.get("_id",""))}" '
+        f'data-date="{date_sort_key(d.get("announcement_month_year",""))}" style="cursor:default">'
+        f'<td class="chk-cell" style="display:none;width:32px;text-align:center;padding:4px">'
+        f'<input type="checkbox" class="row-chk" data-id="{esc_html(d.get("_id",""))}" '
+        f'style="width:14px;height:14px;cursor:pointer;accent-color:#e05252"></td>'
         f'<td class="dc">{fmt_date(d.get("announcement_month_year","—"))}</td>'
         f'<td><strong>{esc_html(d.get("chinese_party","—"))}</strong></td>'
         f'<td>{esc_html(d.get("foreign_party","—"))}</td>'
@@ -1802,6 +1819,19 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 .foot{{position:fixed;bottom:0;left:0;right:0;background:var(--surf);border-top:1px solid var(--brd);padding:7px 48px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--mut);z-index:10}}
 .dot{{width:6px;height:6px;border-radius:50%;background:var(--g);display:inline-block;margin-right:6px;animation:pulse 2s ease-in-out infinite}}
 @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.25}}}}
+
+/* Delete mode */
+.del-btn{{background:none;border:1px solid var(--brd);color:var(--mut);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;cursor:pointer;transition:border-color .15s,color .15s,background .15s}}
+.del-btn:hover{{border-color:#e05252;color:#e05252}}
+.del-btn.active{{background:#e0525222;border-color:#e05252;color:#e05252}}
+#del-bar{{display:none;align-items:center;gap:10px;padding:7px 14px;background:#1a0f0f;border-bottom:1px solid #e0525244;font-size:12px;color:#e05252}}
+#del-bar.visible{{display:flex}}
+#del-count{{font-weight:600}}
+#copy-cmd-btn{{background:#e05252;border:none;color:#fff;font-family:var(--mono);font-size:11px;padding:5px 14px;border-radius:4px;cursor:pointer;transition:background .15s}}
+#copy-cmd-btn:hover{{background:#c03a3a}}
+#copy-cmd-btn:disabled{{background:#555;cursor:default}}
+#copy-confirm{{color:#a8e0a8;font-size:11px;display:none}}
+tr.marked-del td:not(.chk-cell){{opacity:0.4;text-decoration:line-through;text-decoration-color:#e0525288}}
 </style>
 </head>
 <body>
@@ -1816,7 +1846,7 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
     <div>Last updated &nbsp;<strong>{updated}</strong></div>
     <div>Last agent run &nbsp;<strong>{last_run}</strong></div>
     <div>Search window &nbsp;<strong>{window_disp}</strong></div>
-    <div>Refresh &nbsp;<code>python biopharma_agent.py</code></div>
+    <div>Refresh &nbsp;<code>python biopharma_agent.py rebuild</code></div>
   </div>
 </div>
 
@@ -1886,12 +1916,23 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
 </div>
 
 <!-- Table -->
-<div style="display:flex;justify-content:flex-end;padding:6px 14px 2px;background:var(--bg)">
-  <button disabled title="CSV export not available" style="background:none;border:1px solid var(--brd);color:var(--mut);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;opacity:0.35;cursor:not-allowed">&#8595; Export CSV</button>
+<!-- Delete mode bar (shown when delete mode is active) -->
+<div id="del-bar">
+  <span>🗑 Delete mode — check rows to remove</span>
+  <span id="del-count">0 selected</span>
+  <button id="copy-cmd-btn" disabled onclick="copyRemoveCmd()">Copy remove command</button>
+  <span id="copy-confirm">✓ Copied! Paste &amp; run in terminal, then: <code style="background:#ffffff15;padding:1px 6px;border-radius:3px">python biopharma_agent.py rebuild</code></span>
+</div>
+
+<!-- Table toolbar -->
+<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 14px 2px;background:var(--bg)">
+  <button id="del-mode-btn" class="del-btn" onclick="toggleDelMode()">🗑 Delete mode</button>
+  <button onclick="exportCSV()" style="background:none;border:1px solid var(--brd);color:var(--mut);font-family:var(--mono);font-size:11px;padding:4px 12px;border-radius:4px;cursor:pointer" onmouseover="this.style.borderColor='var(--b)';this.style.color='var(--txt)'" onmouseout="this.style.borderColor='var(--brd)';this.style.color='var(--mut)'">&#8595; Export CSV</button>
 </div>
 <div class="tw">
   <table>
     <colgroup>
+      <col id="chk-col" style="width:0;display:none">
       <col style="width:110px">
       <col style="width:155px">
       <col style="width:100px">
@@ -1908,20 +1949,21 @@ tr:nth-child(-n+3) .hl-pop{{bottom:auto;top:calc(100% + 6px)}}
       <col style="width:480px">
     </colgroup>
     <thead><tr>
-      <th onclick="srt(0)">Date ↕</th>
-      <th onclick="srt(1)">Chinese Party ↕</th>
-      <th onclick="srt(2)">Foreign Party ↕</th>
-      <th onclick="srt(3)">Asset ↕</th>
-      <th onclick="srt(4)">Drug Name ↕</th>
-      <th onclick="srt(5)">Therapeutic Area ↕</th>
-      <th onclick="srt(6)">Deal Type ↕</th>
-      <th onclick="srt(7)">Stage ↕</th>
-      <th onclick="srt(8)">Modality ↕</th>
-      <th onclick="srt(9)">Total Value ↕</th>
-      <th onclick="srt(10)">Upfront ↕</th>
-      <th onclick="srt(11)">Territory ↕</th>
+      <th id="chk-th" style="display:none;width:32px"><input type="checkbox" id="chk-all" style="width:14px;height:14px;cursor:pointer;accent-color:#e05252" onclick="toggleAll(this)"></th>
+      <th onclick="srt(1)">Date ↕</th>
+      <th onclick="srt(2)">Chinese Party ↕</th>
+      <th onclick="srt(3)">Foreign Party ↕</th>
+      <th onclick="srt(4)">Asset ↕</th>
+      <th onclick="srt(5)">Drug Name ↕</th>
+      <th onclick="srt(6)">Therapeutic Area ↕</th>
+      <th onclick="srt(7)">Deal Type ↕</th>
+      <th onclick="srt(8)">Stage ↕</th>
+      <th onclick="srt(9)">Modality ↕</th>
+      <th onclick="srt(10)">Total Value ↕</th>
+      <th onclick="srt(11)">Upfront ↕</th>
+      <th onclick="srt(12)">Territory ↕</th>
       <th>Source</th>
-      <th onclick="srt(13)">Highlights (hover to expand)</th>
+      <th onclick="srt(14)">Highlights (hover to expand)</th>
     </tr></thead>
     <tbody id="dt">{rows}</tbody>
   </table>
@@ -2088,6 +2130,11 @@ function srt(c) {{
   const rows = [...tb.querySelectorAll('.dr')];
   sd[c] = !sd[c];
   rows.sort((a,b) => {{
+    if (c === 1) {{
+      const A = parseInt(a.dataset.date) || 0;
+      const B = parseInt(b.dataset.date) || 0;
+      return sd[c] ? A - B : B - A;
+    }}
     const A = a.cells[c]?.textContent.trim() || '';
     const B = b.cells[c]?.textContent.trim() || '';
     return sd[c] ? A.localeCompare(B) : B.localeCompare(A);
@@ -2096,8 +2143,69 @@ function srt(c) {{
 }}
 
 // Default: sort by date descending (newest first)
-// Pre-set sd[0]=true so the first srt(0) call sorts descending
-sd[0] = true; srt(0);
+sd[1] = true; srt(1);
+
+// ── Delete mode ───────────────────────────────────────────────────────────────
+let delModeOn = false;
+
+function toggleDelMode() {{
+  delModeOn = !delModeOn;
+  const btn     = document.getElementById('del-mode-btn');
+  const bar     = document.getElementById('del-bar');
+  const chkCols = document.querySelectorAll('.chk-cell');
+  const chkTh   = document.getElementById('chk-th');
+  btn.classList.toggle('active', delModeOn);
+  bar.classList.toggle('visible', delModeOn);
+  chkTh.style.display = delModeOn ? '' : 'none';
+  chkCols.forEach(c => c.style.display = delModeOn ? '' : 'none');
+  if (!delModeOn) {{
+    document.querySelectorAll('.row-chk').forEach(c => c.checked = false);
+    document.querySelectorAll('.dr').forEach(r => r.classList.remove('marked-del'));
+    document.getElementById('chk-all').checked = false;
+    updateDelCount();
+  }}
+}}
+
+function toggleAll(master) {{
+  document.querySelectorAll('.row-chk').forEach(chk => {{
+    const row = chk.closest('tr');
+    if (!row.classList.contains('hidden')) {{
+      chk.checked = master.checked;
+      row.classList.toggle('marked-del', master.checked);
+    }}
+  }});
+  updateDelCount();
+}}
+
+document.addEventListener('change', function(e) {{
+  if (e.target.classList.contains('row-chk')) {{
+    e.target.closest('tr').classList.toggle('marked-del', e.target.checked);
+    updateDelCount();
+  }}
+}});
+
+function updateDelCount() {{
+  const ids   = getSelectedIds();
+  const count = ids.length;
+  document.getElementById('del-count').textContent = count + ' selected';
+  document.getElementById('copy-cmd-btn').disabled = count === 0;
+  document.getElementById('copy-confirm').style.display = 'none';
+}}
+
+function getSelectedIds() {{
+  return [...document.querySelectorAll('.row-chk:checked')].map(c => c.dataset.id).filter(Boolean);
+}}
+
+function copyRemoveCmd() {{
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  const cmd = 'python biopharma_agent.py remove ' + ids.join(' ');
+  navigator.clipboard.writeText(cmd).then(() => {{
+    const el = document.getElementById('copy-confirm');
+    el.style.display = 'inline';
+    setTimeout(() => el.style.display = 'none', 6000);
+  }});
+}}
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
 const DEALS_DATA = {json.dumps([{
@@ -2757,8 +2865,10 @@ Examples:
   python biopharma_agent.py discover -w 2024-Q3 2024-Q4
   python biopharma_agent.py discover -w 2025 --steps 80
 
+  python biopharma_agent.py remove abc123def4 9f8e7d6c5b
+  python biopharma_agent.py rebuild
+
   python biopharma_agent.py --log
-  python biopharma_agent.py discover -n
         """
     )
     parser.add_argument(
@@ -2806,6 +2916,41 @@ Strategy per deal:
         help=f"Override total step budget (default: {MAX_STEPS})."
     )
 
+    # ── remove subcommand ─────────────────────────────────────────────────────
+    p_remove = subparsers.add_parser(
+        "remove",
+        help="Remove one or more deals from the database by ID, then regenerate dashboard.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+REMOVE MODE — delete deals by ID and regenerate the dashboard.
+
+IDs are shown in the dashboard when Delete Mode is active.
+Copy the full command from the dashboard's 'Copy remove command' button.
+
+Example:
+  python biopharma_agent.py remove abc123def4 9f8e7d6c5b
+        """
+    )
+    p_remove.add_argument(
+        "ids",
+        nargs="+",
+        metavar="ID",
+        help="One or more deal IDs to remove."
+    )
+
+    # ── rebuild subcommand ────────────────────────────────────────────────────
+    p_rebuild = subparsers.add_parser(
+        "rebuild",
+        help="Regenerate dashboard and CSV from the existing database — no agent search.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+REBUILD MODE — regenerate index.html and CSV from the existing database.
+
+No web searches are run. Useful after manually editing deals_database.json,
+after running 'remove', or to apply dashboard code changes to existing data.
+        """
+    )
+
     # ── discover subcommand ───────────────────────────────────────────────────
     p_discover = subparsers.add_parser(
         "discover",
@@ -2837,11 +2982,6 @@ Strategy order:
         metavar="PERIOD",
         help="Time window: e.g. -w 2025  or  -w 2025-Q1  or  -w 2024-Q3 2024-Q4. "
              "Omit for auto window."
-    )
-    p_discover.add_argument(
-        "-n", "--no-query",
-        action="store_true",
-        help="Skip the agent search — only regenerate dashboard and CSV from existing database."
     )
     p_discover.add_argument(
         "--steps",
@@ -2937,6 +3077,61 @@ Strategy order:
         print(f"  Run log        : {RUN_LOG_PATH.resolve()}")
         print(f"  Deals added    : {deals_added}")
         print(f"  Deals in DB    : {len(db['deals'])}\n")
+        import sys; sys.exit(0)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  MODE: REMOVE
+    # ═════════════════════════════════════════════════════════════════════════
+    if args.mode == "remove":
+        ids_to_remove = set(args.ids)
+        before = len(db["deals"])
+        db["deals"] = [d for d in db["deals"] if d.get("_id") not in ids_to_remove]
+        removed = before - len(db["deals"])
+        not_found = ids_to_remove - {d.get("_id") for d in db["deals"]} - ids_to_remove  # always empty but safe
+        # IDs that weren't matched
+        found_ids   = ids_to_remove - {i for i in ids_to_remove if any(d.get("_id") == i for d in db["deals"])}
+        missing_ids = ids_to_remove - found_ids
+        print(f"\n{'='*60}")
+        print(f"  MODE: REMOVE")
+        print(f"  Requested : {len(ids_to_remove)} ID(s)")
+        print(f"  Removed   : {removed} deal(s)")
+        if missing_ids:
+            print(f"  Not found : {', '.join(sorted(missing_ids))}")
+        print(f"  DB total  : {len(db['deals'])} deals remaining")
+        print(f"{'='*60}")
+        save_database(db)
+        window_label = db.get("last_search_window", "—")
+        generate_dashboard(db, window_label)
+        generate_csv(db)
+        log_entry = {
+            "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mode":        "remove",
+            "window":      window_label,
+            "source":      "",
+            "deals_added": -removed,
+            "deals_total": len(db["deals"]),
+            "steps_used":  0,
+        }
+        append_run_log(log_entry)
+        print(f"\n  Dashboard regenerated: {DASHBOARD_PATH.resolve()}")
+        print(f"  CSV regenerated      : {CSV_PATH.resolve()}\n")
+        import sys; sys.exit(0)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  MODE: REBUILD
+    # ═════════════════════════════════════════════════════════════════════════
+    if args.mode == "rebuild":
+        window_label = db.get("last_search_window", "—")
+        print(f"\n{'='*60}")
+        print(f"  MODE: REBUILD")
+        print(f"  Skipping search — regenerating from existing database...")
+        print(f"  Deals in DB : {len(db['deals'])}")
+        print(f"  Window      : {window_label}")
+        print(f"{'='*60}\n")
+        generate_dashboard(db, window_label)
+        generate_csv(db)
+        print(f"\n  Dashboard regenerated: {DASHBOARD_PATH.resolve()}")
+        print(f"  CSV regenerated      : {CSV_PATH.resolve()}\n")
         import sys; sys.exit(0)
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -3157,67 +3352,62 @@ Total target: ~{r1_count + 42}–{r1_count + 47} searches for a full run.
 DO NOT call finish() before completing at least R1, R2, R4, R5, and R7."""
 
     # ── -n: skip search, just rebuild dashboard ───────────────────────────────
-    if args.no_query:
-        print("  [-n] Skipping search — regenerating dashboard from existing database...")
-        window_label = db.get("last_search_window", window_label)
-    else:
-        db["last_search_window"] = window_label
-        save_database(db)
+    db["last_search_window"] = window_label
+    save_database(db)
 
-        RESEARCH_GOAL = (
-            f"Comprehensively research ALL biopharma deals involving Chinese biotech/pharma companies. "
-            f"Search window: {search_window} "
-            f"You MUST run at least 15 varied searches before finishing. "
-            f"There are 90–100 China deals per year — do not stop until all 8 rounds are exhausted. "
-            f"Prioritize discovery of companies NOT yet in the database."
+    RESEARCH_GOAL = (
+        f"Comprehensively research ALL biopharma deals involving Chinese biotech/pharma companies. "
+        f"Search window: {search_window} "
+        f"You MUST run at least 15 varied searches before finishing. "
+        f"There are 90–100 China deals per year — do not stop until all 8 rounds are exhausted. "
+        f"Prioritize discovery of companies NOT yet in the database."
+    )
+
+    # Monkey-patch build_system_prompt to inject discovery rounds
+    _orig_build = build_system_prompt
+    def _discovery_system_prompt(existing_deals, sw, completed_queries=None, csv_mode=False):
+        base = _orig_build(existing_deals, sw, completed_queries, csv_mode=False)
+        # Replace the strategy block with our discovery-ordered rounds
+        strategy = _build_discovery_prompt_rounds(sw, existing_deals)
+        # Splice in after SEARCH STRATEGY header
+        marker = "TOOL USAGE:"
+        if marker in base:
+            pre, _, post = base.partition(marker)
+            # Find end of old strategy (before SEARCH BUDGET REMINDER)
+            budget_marker = "═══════════════════════════════════════════════════\n SEARCH BUDGET REMINDER"
+            if budget_marker in post:
+                _, _, budget_post = post.partition(budget_marker)
+                return pre + strategy + "\n" + "═"*51 + "\n SEARCH BUDGET REMINDER" + budget_post
+        return base
+
+    try:
+        run_agent(
+            RESEARCH_GOAL,
+            search_window,
+            max_steps=max_steps,
+            csv_mode=False
         )
-
-        # Monkey-patch build_system_prompt to inject discovery rounds
-        _orig_build = build_system_prompt
-        def _discovery_system_prompt(existing_deals, sw, completed_queries=None, csv_mode=False):
-            base = _orig_build(existing_deals, sw, completed_queries, csv_mode=False)
-            # Replace the strategy block with our discovery-ordered rounds
-            strategy = _build_discovery_prompt_rounds(sw, existing_deals)
-            # Splice in after SEARCH STRATEGY header
-            marker = "TOOL USAGE:"
-            if marker in base:
-                pre, _, post = base.partition(marker)
-                # Find end of old strategy (before SEARCH BUDGET REMINDER)
-                budget_marker = "═══════════════════════════════════════════════════\n SEARCH BUDGET REMINDER"
-                if budget_marker in post:
-                    _, _, budget_post = post.partition(budget_marker)
-                    return pre + strategy + "\n" + "═"*51 + "\n SEARCH BUDGET REMINDER" + budget_post
-            return base
-
-        try:
-            run_agent(
-                RESEARCH_GOAL,
-                search_window,
-                max_steps=max_steps,
-                csv_mode=False
-            )
-        except KeyboardInterrupt:
-            print("\n  [Interrupted by user]")
-        except Exception as e:
-            print(f"\n  [Unexpected error: {e}]")
-            print("  Saving dashboard with whatever was collected...")
+    except KeyboardInterrupt:
+        print("\n  [Interrupted by user]")
+    except Exception as e:
+        print(f"\n  [Unexpected error: {e}]")
+        print("  Saving dashboard with whatever was collected...")
 
     db = load_database()
     deals_added = len(db["deals"]) - deals_before
     generate_dashboard(db, window_label)
     generate_csv(db)
 
-    if not args.no_query:
-        log_entry = {
-            "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "mode":        "discovery",
-            "window":      window_label,
-            "source":      "",
-            "deals_added": deals_added,
-            "deals_total": len(db["deals"]),
-            "steps_used":  max_steps,
-        }
-        append_run_log(log_entry)
+    log_entry = {
+        "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "mode":        "discovery",
+        "window":      window_label,
+        "source":      "",
+        "deals_added": deals_added,
+        "deals_total": len(db["deals"]),
+        "steps_used":  max_steps,
+    }
+    append_run_log(log_entry)
 
     print(f"\n  Open dashboard : {DASHBOARD_PATH.resolve()}")
     print(f"  Raw data       : {DB_PATH.resolve()}")
