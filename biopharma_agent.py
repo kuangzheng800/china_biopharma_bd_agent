@@ -458,6 +458,43 @@ TOOLS = [
 new_deals_this_run = []
 db = load_database()
 
+TAVILY_URL = "https://api.tavily.com/search"
+
+def _tavily_post(url, json=None, timeout=15):
+    """POST to Tavily. Sends the key as a Bearer header (what the current docs specify;
+    the legacy body field is still included). Any non-200 response raises, so failures
+    show up as 'Search error: ...' instead of being mistaken for 'No results found.'"""
+    r = requests.post(url, json=json,
+                      headers={"Authorization": f"Bearer {TAVILY_API_KEY}"},
+                      timeout=timeout)
+    if r.status_code != 200:
+        raise RuntimeError(f"Tavily HTTP {r.status_code}: {r.text[:200]}")
+    return r
+
+def preflight_check() -> bool:
+    """Fail fast, before spending Anthropic credits, if searching cannot work."""
+    ok = True
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "YOUR_KEY_HERE":
+        print("\n  [ERROR] ANTHROPIC_API_KEY is not set in this terminal session.")
+        ok = False
+    if not TAVILY_API_KEY:
+        print("\n  [ERROR] TAVILY_API_KEY is not set in this terminal session.")
+        print("          Without it every search is unavailable (or returns built-in SAMPLE deals).")
+        ok = False
+    else:
+        try:
+            _tavily_post(TAVILY_URL, json={"api_key": TAVILY_API_KEY,
+                                           "query": "China biotech licensing deal",
+                                           "max_results": 1})
+            print("  [preflight] Tavily key OK")
+        except Exception as e:
+            print(f"\n  [ERROR] Tavily test search failed: {e}")
+            ok = False
+    if not ok:
+        print("          Set the keys in the SAME terminal you run this from, e.g.:")
+        print('            export ANTHROPIC_API_KEY="sk-ant-..."   export TAVILY_API_KEY="tvly-..."')
+    return ok
+
 def fetch_article(url: str, max_chars: int = 3000) -> str:
     """Fetch article text from a URL, return truncated content."""
     try:
@@ -476,7 +513,7 @@ def fetch_article(url: str, max_chars: int = 3000) -> str:
 def search_web(query: str) -> str:
     if TAVILY_API_KEY:
         try:
-            resp = requests.post(
+            resp = _tavily_post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": TAVILY_API_KEY,
@@ -489,7 +526,7 @@ def search_web(query: str) -> str:
             )
             results = resp.json().get("results", [])
             if not results:
-                resp2 = requests.post(
+                resp2 = _tavily_post(
                     "https://api.tavily.com/search",
                     json={"api_key": TAVILY_API_KEY, "query": query,
                           "search_depth": "advanced", "max_results": 5},
@@ -546,7 +583,7 @@ def search_web_cn(query: str) -> str:
     if TAVILY_API_KEY:
         try:
             # First try with Chinese source preference
-            resp = requests.post(
+            resp = _tavily_post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": TAVILY_API_KEY,
@@ -560,7 +597,7 @@ def search_web_cn(query: str) -> str:
             results = resp.json().get("results", [])
             # Fall back to open search (no domain filter) if Chinese sources return nothing
             if not results:
-                resp2 = requests.post(
+                resp2 = _tavily_post(
                     "https://api.tavily.com/search",
                     json={"api_key": TAVILY_API_KEY, "query": query,
                           "search_depth": "advanced", "max_results": 8},
@@ -590,7 +627,7 @@ def search_web_wide(query: str) -> str:
     """Open web search — no domain restrictions. Primary discovery tool for Rounds 1–7."""
     if TAVILY_API_KEY:
         try:
-            resp = requests.post(
+            resp = _tavily_post(
                 "https://api.tavily.com/search",
                 json={"api_key": TAVILY_API_KEY, "query": query,
                       "search_depth": "advanced", "max_results": 8},
@@ -924,11 +961,26 @@ def normalize_usd(s: str) -> str:
 def save_deal(deal_data: dict) -> str:
     global db, new_deals_this_run
 
-    # Validate before touching anything
-    valid, reason = validate_deal(deal_data)
-    if not valid:
+    ok, reason = prepare_deal(deal_data)
+    if not ok:
         print(f"  [REJECTED] {reason}")
         return reason
+
+    if is_duplicate(deal_data, db["deals"]):
+        return f"Duplicate skipped: {deal_data.get('chinese_party')} / {deal_data.get('asset')}"
+
+    db["deals"].append(deal_data)
+    new_deals_this_run.append(deal_data)
+    save_database(db)
+    return f"Saved #{len(db['deals'])}: {deal_data.get('chinese_party')} — {deal_data.get('asset')} [{deal_data.get('source_name')}]"
+
+
+def prepare_deal(deal_data: dict) -> tuple[bool, str]:
+    """Validate and normalise a deal dict IN PLACE (shared by save_deal and CSV import).
+    Returns (ok, reason). Does not dedupe and does not touch the database."""
+    valid, reason = validate_deal(deal_data)
+    if not valid:
+        return False, reason
 
     deal_data["announcement_month_year"] = sanitize_date(
         deal_data.get("announcement_month_year", ""))
@@ -946,14 +998,7 @@ def save_deal(deal_data: dict) -> str:
         deal_data.get("total_value_usd", ""))
     deal_data["_id"]       = make_deal_id(deal_data)
     deal_data["_added_on"] = datetime.now().strftime("%Y-%m-%d")
-
-    if is_duplicate(deal_data, db["deals"]):
-        return f"Duplicate skipped: {deal_data.get('chinese_party')} / {deal_data.get('asset')}"
-
-    db["deals"].append(deal_data)
-    new_deals_this_run.append(deal_data)
-    save_database(db)
-    return f"Saved #{len(db['deals'])}: {deal_data.get('chinese_party')} — {deal_data.get('asset')} [{deal_data.get('source_name')}]"
+    return True, ""
 
 def finish(summary: str) -> str:
     return f"AGENT_DONE: {summary}"
@@ -2252,25 +2297,37 @@ function exportCSV() {{
 
 # ── CSV Export ────────────────────────────────────────────────────────────────
 
+# Single source of truth for the exported CSV layout (used by generate_csv AND import).
+# Fields and headers are index-aligned: CSV_EXPORT_COLS[i] is labelled CSV_EXPORT_HEADERS[i].
+CSV_EXPORT_COLS = [
+    "announcement_month_year", "deal_type", "chinese_party", "foreign_party",
+    "asset", "drug_name", "therapeutic_area", "stage", "equity_component",
+    "total_value_usd", "upfront_usd", "territory", "modality", "highlights",
+    "source_name", "source_url",
+]
+CSV_EXPORT_HEADERS = [
+    "Date", "Deal Type", "Chinese Party", "Foreign Party",
+    "Asset", "Drug Name", "Therapeutic Area", "Stage", "Equity Component",
+    "Total Value (USD)", "Upfront (USD)", "Territory", "Modality", "Highlights",
+    "Source", "Source URL",
+]
+# Header row written by earlier versions: 14 labels over 16 data columns, so labels
+# after "Asset" were misaligned. Rows from such files are read by POSITION, not label.
+_LEGACY_CSV_HEADERS = [
+    "Date", "Deal Type", "Chinese Party", "Foreign Party",
+    "Asset", "Therapeutic Area", "Stage", "Total Value (USD)", "Upfront (USD)",
+    "Territory", "Modality", "Highlights", "Source", "Source URL",
+]
+
 def generate_csv(db: dict):
     """Write all deals to a CSV file with every column including highlights."""
     import csv
     deals = db["deals"]
-    cols  = [
-        "announcement_month_year", "deal_type", "chinese_party", "foreign_party",
-        "asset", "drug_name", "therapeutic_area", "stage", "equity_component", "total_value_usd", "upfront_usd",
-        "territory", "modality", "highlights", "source_name", "source_url"
-    ]
-    headers = [
-        "Date", "Deal Type", "Chinese Party", "Foreign Party",
-        "Asset", "Therapeutic Area", "Stage", "Total Value (USD)", "Upfront (USD)",
-        "Territory", "Modality", "Highlights", "Source", "Source URL"
-    ]
     with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(headers)
+        writer.writerow(CSV_EXPORT_HEADERS)
         for d in deals:
-            writer.writerow([d.get(c, "") for c in cols])
+            writer.writerow([d.get(c, "") for c in CSV_EXPORT_COLS])
     print(f"CSV written     -> {CSV_PATH.resolve()}")
 
 
@@ -2816,6 +2873,117 @@ CRITICAL: Save exactly once, then finish(). Do NOT save unrelated deals found wh
     save_database(db, mark_run=True)
 
 
+# ── CSV → Database import (no web search, no API calls) ────────────────────────
+
+_IMPORT_LABELS = {
+    # CSV header label (lowercase) → internal field
+    "date": "announcement_month_year", "deal type": "deal_type",
+    "chinese party": "chinese_party", "foreign party": "foreign_party",
+    "asset": "asset", "drug name": "drug_name",
+    "therapeutic area": "therapeutic_area", "stage": "stage",
+    "equity component": "equity_component", "modality": "modality",
+    "total value (usd)": "total_value_usd", "total value": "total_value_usd",
+    "upfront (usd)": "upfront_usd", "upfront": "upfront_usd",
+    "territory": "territory", "highlights": "highlights",
+    "source": "source_name", "source url": "source_url",
+}
+
+def parse_import_date(raw: str):
+    """Strict date parser for imports. Returns 'Month YYYY' or None.
+    Unlike sanitize_date it never guesses — unusable dates must be rejected, not
+    silently replaced with the current month."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    months = ["January","February","March","April","May","June","July",
+              "August","September","October","November","December"]
+    m = re.fullmatch(r"([A-Za-z]{3,9})\.?\s+(\d{4})", s)          # March 2024 / Mar 2024
+    if m:
+        for i, name in enumerate(months):
+            if name.lower().startswith(m.group(1).lower()):
+                return f"{name} {m.group(2)}"
+        return None
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})", s)                   # 2024-03 / 2024/3
+    if m and 1 <= int(m.group(2)) <= 12:
+        return f"{months[int(m.group(2)) - 1]} {m.group(1)}"
+    m = re.fullmatch(r"(\d{2})/(\d{1,2})", s)                      # 24/03 (dashboard display)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return f"{months[int(m.group(2)) - 1]} 20{m.group(1)}"
+    return None
+
+def import_csv_to_db(db: dict, path, dry_run: bool = False) -> dict:
+    """Load deals from a CSV straight into `db` — no searching, no API calls.
+    Understands: current export, legacy export (misaligned header, read by position),
+    and the dashboard's 'Export CSV' button. Each row goes through the same
+    validate/normalise/dedupe pipeline as a live save. Returns a stats dict.
+    When dry_run is True, db is left untouched."""
+    import csv as _csv
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        rows = list(_csv.reader(fh))
+    if not rows:
+        raise ValueError("CSV file is empty")
+
+    header = [h.strip() for h in rows[0]]
+    while header and header[-1] == "":          # Excel pads short header rows with blanks
+        header.pop()
+    legacy = [h.lower() for h in header] == [h.lower() for h in _LEGACY_CSV_HEADERS]
+
+    colmap = None                                # index → field, for label-based files
+    if not legacy:
+        colmap = {}
+        for i, h in enumerate(header):
+            hl = h.lower()
+            field = (_IMPORT_LABELS.get(hl)
+                     or (hl if hl in CSV_EXPORT_COLS else None)
+                     or _CSV_COL_ALIASES.get(hl))
+            if field == "date_hint":
+                field = "announcement_month_year"
+            if field:
+                colmap[i] = field
+        if "chinese_party" not in colmap.values() or "asset" not in colmap.values():
+            raise ValueError("Could not find 'Chinese Party' and 'Asset' columns in the CSV header: "
+                             + ", ".join(header))
+
+    pool = list(db["deals"])                      # work on a copy; commit only if not dry_run
+    stats = {"format": "legacy (by position)" if legacy else "labelled (by header)",
+             "rows": 0, "added": 0, "duplicates": [], "rejected": []}
+
+    for line_no, row in enumerate(rows[1:], start=2):
+        if not any(c.strip() for c in row):
+            continue
+        stats["rows"] += 1
+        if legacy:
+            if len(row) < len(CSV_EXPORT_COLS):
+                stats["rejected"].append((line_no, f"legacy row has {len(row)} fields, expected {len(CSV_EXPORT_COLS)}"))
+                continue
+            deal = {f: row[i].strip() for i, f in enumerate(CSV_EXPORT_COLS)}
+        else:
+            deal = {}
+            for i, f in colmap.items():
+                if i < len(row) and row[i].strip() and not deal.get(f):
+                    deal[f] = row[i].strip()
+
+        date = parse_import_date(deal.get("announcement_month_year", ""))
+        if not date:
+            stats["rejected"].append((line_no, f"unparseable date '{deal.get('announcement_month_year','')}'"))
+            continue
+        deal["announcement_month_year"] = date
+
+        ok, reason = prepare_deal(deal)
+        if not ok:
+            stats["rejected"].append((line_no, reason))
+            continue
+        if is_duplicate(deal, pool):
+            stats["duplicates"].append((line_no, f"{deal.get('chinese_party')} / {deal.get('asset')}"))
+            continue
+        pool.append(deal)
+        stats["added"] += 1
+
+    if not dry_run:
+        db["deals"] = pool
+    return stats
+
+
 # ── Run Log ────────────────────────────────────────────────────────────────────
 
 RUN_LOG_PATH = Path("run_log.jsonl")   # one JSON object per line, one per run
@@ -2865,6 +3033,8 @@ Examples:
   python biopharma_agent.py discover -w 2024-Q3 2024-Q4
   python biopharma_agent.py discover -w 2025 --steps 80
 
+  python biopharma_agent.py import old_deals.csv --dry-run
+  python biopharma_agent.py import old_deals.csv
   python biopharma_agent.py remove abc123def4 9f8e7d6c5b
   python biopharma_agent.py rebuild
 
@@ -2938,6 +3108,33 @@ Example:
         help="One or more deal IDs to remove."
     )
 
+    # ── import subcommand ─────────────────────────────────────────────────────
+    p_import = subparsers.add_parser(
+        "import",
+        help="Load deals from a CSV straight into the database — no web search, no API cost.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+IMPORT MODE — load a CSV into deals_database.json without any searching.
+
+Accepts this tool's own exports (current AND older files with the misaligned
+header), plus the dashboard's 'Export CSV' download. Every row is validated,
+normalised and de-duplicated exactly like a live save; rows with unusable dates
+or missing Chinese party / asset are rejected and listed.
+
+Existing deals are kept. Backups of the database (and CSV, if overwritten) are
+written next to them before anything changes. Use --dry-run to preview.
+
+Example:
+  python biopharma_agent.py import old_deals.csv --dry-run
+  python biopharma_agent.py import old_deals.csv
+        """
+    )
+    p_import.add_argument("csv", metavar="CSV_FILE", help="Path to the CSV file to import.")
+    p_import.add_argument(
+        "--dry-run", action="store_true",
+        help="Report what would be added/skipped/rejected; write nothing."
+    )
+
     # ── rebuild subcommand ────────────────────────────────────────────────────
     p_rebuild = subparsers.add_parser(
         "rebuild",
@@ -3005,6 +3202,11 @@ Strategy order:
 
     db           = load_database()
     deals_before = len(db["deals"])
+
+    if args.mode in ("discover", "target"):
+        import sys
+        if not preflight_check():
+            sys.exit(1)
 
     # ═════════════════════════════════════════════════════════════════════════
     #  MODE 1 — TARGETED
@@ -3078,6 +3280,67 @@ Strategy order:
         print(f"  Deals added    : {deals_added}")
         print(f"  Deals in DB    : {len(db['deals'])}\n")
         import sys; sys.exit(0)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  MODE: IMPORT
+    # ═════════════════════════════════════════════════════════════════════════
+    if args.mode == "import":
+        import sys, shutil
+        csv_path = Path(args.csv)
+        if not csv_path.exists():
+            print(f"\n  [ERROR] CSV file not found: {csv_path}")
+            sys.exit(1)
+        print(f"\n{'='*60}")
+        print(f"  MODE: IMPORT{'  (dry run — nothing will be written)' if args.dry_run else ''}")
+        print(f"  File        : {csv_path.resolve()}")
+        print(f"  DB before   : {deals_before} deals  ({DB_PATH.resolve()})")
+        try:
+            stats = import_csv_to_db(db, csv_path, dry_run=args.dry_run)
+        except ValueError as e:
+            print(f"\n  [ERROR] {e}")
+            sys.exit(1)
+        print(f"  Format      : {stats['format']}")
+        print(f"  Rows read   : {stats['rows']}")
+        print(f"  Added       : {stats['added']}")
+        print(f"  Duplicates  : {len(stats['duplicates'])}  (already in DB or repeated in file — skipped)")
+        print(f"  Rejected    : {len(stats['rejected'])}")
+        for line_no, why in stats["rejected"][:15]:
+            print(f"      line {line_no}: {why}")
+        if len(stats["rejected"]) > 15:
+            print(f"      ... and {len(stats['rejected']) - 15} more")
+        print(f"{'='*60}")
+
+        if args.dry_run:
+            print(f"\n  Dry run only — DB would go from {deals_before} to {deals_before + stats['added']} deals.\n")
+            sys.exit(0)
+
+        if stats["added"] == 0:
+            print("\n  Nothing new to import — database left unchanged.\n")
+            sys.exit(0)
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for p in (DB_PATH, CSV_PATH):
+            if p.exists():
+                bak = p.with_name(f"{p.stem}.bak-{stamp}{p.suffix}")
+                shutil.copy2(p, bak)
+                print(f"  Backup      : {bak.name}")
+        save_database(db)
+        window_label = db.get("last_search_window", "—")
+        generate_dashboard(db, window_label)
+        generate_csv(db)
+        append_run_log({
+            "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "mode":        "import",
+            "window":      window_label,
+            "source":      str(csv_path),
+            "deals_added": stats["added"],
+            "deals_total": len(db["deals"]),
+            "steps_used":  0,
+        })
+        print(f"\n  Deals in DB    : {len(db['deals'])}")
+        print(f"  Raw data       : {DB_PATH.resolve()}")
+        print(f"  Dashboard      : {DASHBOARD_PATH.resolve()}\n")
+        sys.exit(0)
 
     # ═════════════════════════════════════════════════════════════════════════
     #  MODE: REMOVE
